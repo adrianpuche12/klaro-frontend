@@ -146,7 +146,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         new URLSearchParams({
           grant_type: 'refresh_token',
           refresh_token: refreshToken,
-          client_id: 'proyecto-h-client',
+          client_id: 'klaro-backend',
         }),
         { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
       );
@@ -197,7 +197,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           grant_type: 'password',
           username,
           password,
-          client_id: 'proyecto-h-client',
+          client_id: 'klaro-backend',
         }),
         { 
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, 

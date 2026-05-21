@@ -53,10 +53,10 @@ const LoginScreen = () => {
         <View style={styles.topSection}>
           <Avatar.Image
             size={110}
-            source={require('../assets/images/logo_proyecto_Humberto.jpg')}
+            source={require('../assets/images/icon.png')}
             style={styles.logo}
           />
-          <Title style={styles.welcomeText}>Bienvenido</Title>
+          <Title style={styles.welcomeText}>Klaro</Title>
         </View>
 
         {/* Card del formulario */}
