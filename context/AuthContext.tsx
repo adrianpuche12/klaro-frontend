@@ -154,9 +154,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { access_token, refresh_token, expires_in } = response.data;
       const decodedToken = jwtDecode<any>(access_token);
       const userRoles = decodedToken.realm_access?.roles || [];
+      const isRoot  = userRoles.includes('root');
       const isAdmin = userRoles.includes('admin');
       const userName = decodedToken.preferred_username;
       const userId = decodedToken.sub;
+      const appRoles = isRoot ? ['root'] : isAdmin ? ['admin'] : ['user'];
 
       await Storage.multiSet([
         ['accessToken', access_token],
@@ -164,7 +166,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ['expiresIn', expires_in.toString()],
         ['userName', userName],
         ['userId', userId],
-        ['roles', JSON.stringify(isAdmin ? ['admin'] : ['user'])],
+        ['roles', JSON.stringify(appRoles)],
       ]);
 
       setAxiosAuthHeader(access_token);
@@ -173,7 +175,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         accessToken: access_token,
         refreshToken: refresh_token,
         expiresIn: expires_in,
-        roles: isAdmin ? ['admin'] : ['user'],
+        roles: appRoles,
         userName,
         userId,
         loading: false,
@@ -212,9 +214,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('Roles from token:', decodedToken.realm_access?.roles);
 
       const userRoles = decodedToken.realm_access?.roles || [];
+      const isRoot  = userRoles.includes('root');
       const isAdmin = userRoles.includes('admin');
       const userName = decodedToken.preferred_username;
       const userId = decodedToken.sub;
+      const appRoles = isRoot ? ['root'] : isAdmin ? ['admin'] : ['user'];
 
       await Storage.multiSet([
         ['accessToken', access_token],
@@ -222,7 +226,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ['expiresIn', expires_in.toString()],
         ['userName', userName],
         ['userId', userId],
-        ['roles', JSON.stringify(isAdmin ? ['admin'] : ['user'])],
+        ['roles', JSON.stringify(appRoles)],
       ]);
 
       setAxiosAuthHeader(access_token);
@@ -230,7 +234,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         accessToken: access_token,
         refreshToken: refresh_token,
         expiresIn: expires_in,
-        roles: isAdmin ? ['admin'] : ['user'],
+        roles: appRoles,
         userName,
         userId,
         loading: false,

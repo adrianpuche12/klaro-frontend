@@ -6,6 +6,7 @@ import {
 import { Button, TextInput, Snackbar, IconButton } from 'react-native-paper';
 import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
+import { useAuth } from '../context/AuthContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, BREAKPOINT } from '../theme';
 
@@ -28,9 +29,10 @@ interface UserForm {
   username: string;
   password: string;
   storeId: string;
+  role: 'user' | 'admin';
 }
 
-const EMPTY_FORM: UserForm = { fullName: '', username: '', password: '', storeId: '' };
+const EMPTY_FORM: UserForm = { fullName: '', username: '', password: '', storeId: '', role: 'user' };
 
 const statusLabel = (s: string) => s === 'ACTIVE' ? 'Activo' : 'Suspendido';
 const statusColor = (s: string) => s === 'ACTIVE' ? '#168542' : '#d32121';
@@ -41,6 +43,8 @@ export default function UsersScreen() {
   const API = REACT_APP_API_URL;
   const { width } = useWindowDimensions();
   const isDesktop = width >= BREAKPOINT.desktop;
+  const { roles } = useAuth();
+  const isRoot = roles.includes('root');
 
   const [users, setUsers]           = useState<AppUser[]>([]);
   const [stores, setStores]         = useState<Store[]>([]);
@@ -100,6 +104,7 @@ export default function UsersScreen() {
         username: form.username.trim().toLowerCase(),
         password: form.password,
         storeId:  Number(form.storeId),
+        role:     form.role,
       });
       setSnackbar('Usuario creado correctamente');
       setCreateModal(false);
@@ -294,7 +299,27 @@ export default function UsersScreen() {
                 ))}
               </View>
 
-              <Text style={styles.roleNote}>El usuario recibirá el rol <Text style={{ fontWeight: '900' }}>user</Text> automáticamente.</Text>
+              {/* Selector de rol — solo root puede asignar admin */}
+              {isRoot ? (
+                <View style={{ marginBottom: SPACE.s2 }}>
+                  <Text style={styles.fieldLabel}>Rol *</Text>
+                  <View style={styles.storeSelector}>
+                    {(['user', 'admin'] as const).map(r => (
+                      <TouchableOpacity
+                        key={r}
+                        style={[styles.storeChip, form.role === r && styles.storeChipActive]}
+                        onPress={() => setForm({ ...form, role: r })}
+                      >
+                        <Text style={[styles.storeChipText, form.role === r && styles.storeChipTextActive]}>
+                          {r === 'user' ? 'Cajero (user)' : 'Gerente (admin)'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              ) : (
+                <Text style={styles.roleNote}>El usuario recibirá el rol <Text style={{ fontWeight: '900' }}>user</Text> automáticamente.</Text>
+              )}
 
               <View style={styles.modalActions}>
                 <Button mode="outlined" onPress={() => { setCreateModal(false); setForm(EMPTY_FORM); }} style={{ flex: 1 }}>Cancelar</Button>

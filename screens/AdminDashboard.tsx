@@ -11,6 +11,7 @@ import POSScreen from './POSScreen';
 import SalesHistoryScreen from './SalesHistoryScreen';
 import DashboardScreen from './DashboardScreen';
 import UsersScreen from './UsersScreen';
+import TenantConfigScreen from './TenantConfigScreen';
 
 const SCREEN_TITLE: Record<SidebarScreen, string> = {
   dashboard:    'Dashboard',
@@ -20,6 +21,7 @@ const SCREEN_TITLE: Record<SidebarScreen, string> = {
   salesHistory: 'Historial ventas',
   users:        'Usuarios',
   sales:        'Ventas',
+  tenantConfig: 'Configuración',
 };
 
 const AdminDashboard = () => {
@@ -71,6 +73,7 @@ const AdminDashboard = () => {
           {activeScreen === 'stores'       && <StoresScreen />}
           {activeScreen === 'sales'        && <POSScreen />}
           {activeScreen === 'salesHistory' && <SalesHistoryScreen />}
+          {activeScreen === 'tenantConfig' && <TenantConfigScreen />}
         </View>
 
         {/* Drawer mobile */}

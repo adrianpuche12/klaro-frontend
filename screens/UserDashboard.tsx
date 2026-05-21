@@ -33,7 +33,7 @@ const UserSidebar = ({ active, onSelect, onClose, isDesktop }: {
     <View style={styles.sidebar}>
       <View style={styles.sidebarHeader}>
         <View>
-          <Text style={styles.brandText}>PH</Text>
+          <Text style={styles.brandText}>Klaro</Text>
           <Text style={styles.brandSub}>{userName}</Text>
         </View>
         {!isDesktop && (
@@ -75,14 +75,19 @@ const UserContent = () => {
   const { width } = useWindowDimensions();
   const isDesktop = width >= BREAKPOINT.desktop;
   const { userName } = useAuth();
-  const { stores, setSelectedStore } = useStore();
+  const { stores, setSelectedStore, loadingStores } = useStore();
 
   const [active, setActive]         = useState<UserScreen>('sales');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [ready, setReady]           = useState(false);
 
   useEffect(() => {
-    if (!userName || stores.length === 0) return;
+    if (loadingStores) return;
+    if (stores.length === 0 || !userName) {
+      if (stores[0]) setSelectedStore(stores[0]);
+      setReady(true);
+      return;
+    }
     axios.get(`${REACT_APP_API_URL}/api/v2/users/by-username/${userName}`)
       .then(res => {
         const store = stores.find(s => s.id === res.data.storeId);
@@ -91,11 +96,22 @@ const UserContent = () => {
       })
       .catch(() => { if (stores[0]) setSelectedStore(stores[0]); })
       .finally(() => setReady(true));
-  }, [userName, stores]);
+  }, [userName, stores, loadingStores]);
 
   const screenTitle = MENU.find(m => m.key === active)?.label ?? '';
 
   if (!ready) return <ActivityIndicator size="large" color={COLOR.brand} style={{ flex: 1, marginTop: 60 }} />;
+
+  if (stores.length === 0) return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+      <Text style={{ fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, textAlign: 'center' }}>
+        Sin locales asignados
+      </Text>
+      <Text style={{ fontSize: FONT_SIZE.body, color: COLOR.inkMute, textAlign: 'center', marginTop: 8 }}>
+        Pedí al administrador que te asigne un local.
+      </Text>
+    </View>
+  );
 
   return (
     <View style={styles.container}>
