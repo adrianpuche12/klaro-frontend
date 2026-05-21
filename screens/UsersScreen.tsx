@@ -4,6 +4,7 @@ import {
   ActivityIndicator, Modal, useWindowDimensions,
 } from 'react-native';
 import { Button, TextInput, Snackbar, IconButton } from 'react-native-paper';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
 import { useAuth } from '../context/AuthContext';
@@ -200,7 +201,10 @@ export default function UsersScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>👥 Usuarios</Text>
+        <View style={styles.headerTitleRow}>
+          <MaterialCommunityIcons name="account-multiple-outline" size={22} color={COLOR.ink} />
+          <Text style={styles.headerTitle}>Usuarios</Text>
+        </View>
         <Button mode="contained" onPress={() => setCreateModal(true)} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ borderRadius: 10 }}>
           + Nuevo usuario
         </Button>
@@ -211,7 +215,7 @@ export default function UsersScreen() {
         <ActivityIndicator size="large" color={COLOR.brand} style={{ marginTop: 40 }} />
       ) : users.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>👤</Text>
+          <MaterialCommunityIcons name="account-outline" size={48} color={COLOR.inkDisabled} />
           <Text style={styles.emptyText}>No hay usuarios creados aún.</Text>
           <Text style={styles.emptySub}>Creá el primer usuario con el botón de arriba.</Text>
         </View>
@@ -398,10 +402,10 @@ const styles = StyleSheet.create({
   root:           { flex: 1, backgroundColor: COLOR.bg },
 
   header:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: SPACE.s2, padding: SPACE.s4, backgroundColor: COLOR.surface, borderBottomWidth: 1, borderBottomColor: COLOR.border },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s2 },
   headerTitle:    { fontSize: FONT_SIZE.h1, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
 
   empty:          { flex: 1, justifyContent: 'center', alignItems: 'center', gap: SPACE.s2, padding: SPACE.s8 },
-  emptyIcon:      { fontSize: 40 },
   emptyText:      { fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
   emptySub:       { fontSize: FONT_SIZE.label, color: COLOR.inkMute },
 

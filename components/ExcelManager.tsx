@@ -14,6 +14,7 @@ import {
 import { DatePickerModal } from 'react-native-paper-dates';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { exportToExcel, createImportTemplate, importFromExcel, TRANSACTION_LABELS } from '../utils/ExcelUtils';
 import { REACT_APP_API_URL } from '../config';
 
@@ -309,7 +310,16 @@ const ExcelManager: React.FC<ExcelManagerProps> = ({
               visible={showResult}
               onDismiss={() => setShowResult(false)}
             >
-              <Dialog.Title>{result?.success ? '✅ Éxito' : '❌ Error'}</Dialog.Title>
+              <Dialog.Title>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <MaterialCommunityIcons
+                    name={result?.success ? 'check-circle-outline' : 'close-circle-outline'}
+                    size={22}
+                    color={result?.success ? '#168542' : '#d32121'}
+                  />
+                  {result?.success ? 'Éxito' : 'Error'}
+                </View>
+              </Dialog.Title>
               <Dialog.Content>
                 <Paragraph>{result?.message}</Paragraph>
                 {result?.details?.errors && result.details.errors.length > 0 && (

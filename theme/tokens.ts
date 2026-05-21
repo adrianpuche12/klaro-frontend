@@ -1,5 +1,5 @@
 /**
- * DESIGN TOKENS — Pollos Hermanos / Proyecto Humberto V2
+ * DESIGN TOKENS — Klaro SaaS
  *
  * FUENTE DE VERDAD ÚNICA para toda la interfaz.
  * Cualquier cambio visual se hace aquí y se propaga automáticamente
@@ -13,12 +13,12 @@
 
 // ─── COLORES ─────────────────────────────────────────────────────────────────
 //
-// Paleta cálida. Brand = amarillo Pollos Hermanos (levemente suavizado).
+// Paleta cálida. Brand = dorado Klaro.
 // Fondo warm-white en lugar de gris frío.
 
 export const COLOR = {
   // ── Brand (amarillo PH) ───────────────────────────────────────────────────
-  brand:         '#F5C430',  // amarillo principal — identidad Pollos Hermanos
+  brand:         '#F5C430',  // dorado principal — identidad Klaro
   brandDark:     '#D4A520',  // versión oscura para estados presionados / hover
   brandDeep:     '#A68022',  // versión muy oscura para texto sobre brand
   brandTint:     '#FEF6D8',  // fondo amarillo muy suave (badges, highlights)

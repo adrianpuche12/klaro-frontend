@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Text } from 'react-native';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import Sidebar, { SidebarScreen } from '../components/Sidebar';
 import { StoreProvider } from '../context/StoreContext';
 import { UIPreferencesProvider } from '../context/UIPreferencesContext';
@@ -57,7 +58,7 @@ const AdminDashboard = () => {
                 style={styles.menuBtn}
                 activeOpacity={0.7}
               >
-                <Text style={styles.menuBtnIcon}>☰</Text>
+                <MaterialCommunityIcons name="menu" size={24} color={COLOR.ink} />
               </TouchableOpacity>
               <Text style={styles.topbarTitle}>
                 {SCREEN_TITLE[activeScreen] ?? 'Menú'}
@@ -114,11 +115,6 @@ const styles = StyleSheet.create({
     borderBottomColor: COLOR.brandDark,
   },
   menuBtn:     { padding: SPACE.s1 },
-  menuBtnIcon: {
-    fontSize: 22,
-    fontWeight: FONT_WEIGHT.black as any,
-    color: COLOR.ink,
-  },
   topbarTitle: {
     fontSize: FONT_SIZE.h2,
     fontWeight: FONT_WEIGHT.bold as any,

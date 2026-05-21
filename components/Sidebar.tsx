@@ -229,8 +229,8 @@ const SidebarMobile = ({ active, onSelect, visible, onClose }: {
               style={styles.logo}
             />
             <View style={styles.brandText}>
-              <Text style={styles.brandName}>Pollos Hermanos</Text>
-              <Text style={styles.brandSub}>Sistema de gestión</Text>
+              <Text style={styles.brandName}>Klaro</Text>
+              <Text style={styles.brandSub}>{userName ?? 'Sistema de gestión'}</Text>
             </View>
             <IconButton icon="close" size={20} iconColor={COLOR.ink2} onPress={onClose} style={{ margin: 0 }} />
           </View>
