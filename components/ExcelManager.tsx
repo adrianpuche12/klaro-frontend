@@ -16,6 +16,7 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { exportToExcel, createImportTemplate, importFromExcel, TRANSACTION_LABELS } from '../utils/ExcelUtils';
+import { COLOR } from '../theme';
 import { REACT_APP_API_URL } from '../config';
 
 interface ExcelManagerProps {
@@ -299,7 +300,7 @@ const ExcelManager: React.FC<ExcelManagerProps> = ({
           {/* Indicador de carga */}
           {loading && (
             <View style={styles.loadingOverlay}>
-              <ActivityIndicator size="large" color="#2196F3" />
+              <ActivityIndicator size="large" color={COLOR.brand} />
               <Text style={styles.loadingText}>Procesando...</Text>
             </View>
           )}
@@ -315,7 +316,7 @@ const ExcelManager: React.FC<ExcelManagerProps> = ({
                   <MaterialCommunityIcons
                     name={result?.success ? 'check-circle-outline' : 'close-circle-outline'}
                     size={22}
-                    color={result?.success ? '#168542' : '#d32121'}
+                    color={result?.success ? COLOR.income : COLOR.expense}
                   />
                   {result?.success ? 'Éxito' : 'Error'}
                 </View>

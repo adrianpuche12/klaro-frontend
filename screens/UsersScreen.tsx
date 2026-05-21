@@ -36,7 +36,7 @@ interface UserForm {
 const EMPTY_FORM: UserForm = { fullName: '', username: '', password: '', storeId: '', role: 'user' };
 
 const statusLabel = (s: string) => s === 'ACTIVE' ? 'Activo' : 'Suspendido';
-const statusColor = (s: string) => s === 'ACTIVE' ? '#168542' : '#d32121';
+const statusColor = (s: string) => s === 'ACTIVE' ? COLOR.income : COLOR.expense;
 
 // ─── UsersScreen ──────────────────────────────────────────────────────────────
 

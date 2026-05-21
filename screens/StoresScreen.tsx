@@ -182,7 +182,7 @@ const StoresScreen = () => {
                   <IconButton
                     icon={store.active ? 'toggle-switch' : 'toggle-switch-off'}
                     size={22}
-                    iconColor={store.active ? '#168542' : '#b8c0cc'}
+                    iconColor={store.active ? COLOR.income : COLOR.inkDisabled}
                     onPress={() => handleToggle(store)}
                   />
                   {/* Eliminar */}
