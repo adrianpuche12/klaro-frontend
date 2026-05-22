@@ -3,8 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions, Modal } 
 import { ActivityIndicator, IconButton } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import axios from 'axios';
-import { StoreProvider, useStore } from '../context/StoreContext';
-import { UIPreferencesProvider } from '../context/UIPreferencesContext';
+import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { REACT_APP_API_URL } from '../config';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, BREAKPOINT } from '../theme';
@@ -154,13 +153,7 @@ const UserContent = () => {
 
 // ─── UserDashboard (punto de entrada) ─────────────────────────────────────────
 
-const UserDashboard = () => (
-  <UIPreferencesProvider>
-    <StoreProvider>
-      <UserContent />
-    </StoreProvider>
-  </UIPreferencesProvider>
-);
+const UserDashboard = () => <UserContent />;
 
 export default UserDashboard;
 

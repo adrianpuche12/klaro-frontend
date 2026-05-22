@@ -1,6 +1,8 @@
 import { Slot, useSegments, useRootNavigationState, router } from 'expo-router';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from '../context/AuthContext';
+import { StoreProvider } from '../context/StoreContext';
+import { UIPreferencesProvider } from '../context/UIPreferencesContext';
 
 type ValidSegment = 'login' | 'admin' | 'index' | '(tabs)' | '+not-found';
 
@@ -39,7 +41,11 @@ function RootLayoutNav() {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <RootLayoutNav />
+      <UIPreferencesProvider>
+        <StoreProvider>
+          <RootLayoutNav />
+        </StoreProvider>
+      </UIPreferencesProvider>
     </AuthProvider>
   );
 }

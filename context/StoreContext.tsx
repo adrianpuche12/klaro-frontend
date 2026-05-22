@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
+import { useAuth } from './AuthContext';
 
 export interface Store {
   id: number;
@@ -25,6 +26,7 @@ const StoreContext = createContext<StoreContextType>({
 });
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAuthenticated } = useAuth();
   const [stores, setStores]               = useState<Store[]>([]);
   const [selectedStore, setSelectedStore] = useState<Store | null>(null);
   const [loadingStores, setLoadingStores] = useState(true);
@@ -42,8 +44,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      setStores([]);
+      setSelectedStore(null);
+      setLoadingStores(false);
+      return;
+    }
+    setLoadingStores(true);
     refreshStores().finally(() => setLoadingStores(false));
-  }, []);
+  }, [isAuthenticated]);
 
   return (
     <StoreContext.Provider value={{ stores, selectedStore, setSelectedStore, loadingStores, refreshStores }}>

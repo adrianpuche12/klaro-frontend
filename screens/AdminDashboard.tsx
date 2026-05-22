@@ -2,8 +2,6 @@ import React, { useState } from 'react';
 import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Text } from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import Sidebar, { SidebarScreen } from '../components/Sidebar';
-import { StoreProvider } from '../context/StoreContext';
-import { UIPreferencesProvider } from '../context/UIPreferencesContext';
 import { COLOR, SPACE, FONT_SIZE, FONT_WEIGHT, CONTROL, BREAKPOINT } from '../theme';
 import AdminScreen from './AdminScreen';
 import StoresScreen from './StoresScreen';
@@ -33,9 +31,7 @@ const AdminDashboard = () => {
   const [drawerOpen, setDrawerOpen]     = useState(false);
 
   return (
-    <UIPreferencesProvider>
-    <StoreProvider>
-      <View style={styles.container}>
+    <View style={styles.container}>
 
         {/* Sidebar fijo en desktop */}
         {isDesktop && (
@@ -86,9 +82,7 @@ const AdminDashboard = () => {
             onClose={() => setDrawerOpen(false)}
           />
         )}
-      </View>
-    </StoreProvider>
-    </UIPreferencesProvider>
+    </View>
   );
 };
 

@@ -117,6 +117,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshPromiseRef = useRef<Promise<any> | null>(null);
   // A-02: ref para que el interceptor lea el token fresco sin re-montarse
   const refreshTokenRef   = useRef<string | null>(authState.refreshToken);
+  // C-07: timer para refresh proactivo antes de que expire el token
+  const refreshTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     refreshTokenRef.current = authState.refreshToken;
@@ -128,6 +130,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } else {
       delete axios.defaults.headers.common['Authorization'];
     }
+  };
+
+  // C-07: programa un refresh proactivo ~60s antes del exp del token
+  const scheduleRefresh = (token: string) => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    try {
+      const decoded = jwtDecode<any>(token);
+      const msUntilRefresh = decoded.exp * 1000 - Date.now() - 60_000;
+      if (msUntilRefresh > 0) {
+        refreshTimerRef.current = setTimeout(() => {
+          refreshAccessToken().catch(() => {});
+        }, msUntilRefresh);
+      }
+    } catch {}
   };
 
   const isTokenExpiringSoon = (token: string): boolean => {
@@ -183,6 +199,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ]);
 
       setAxiosAuthHeader(access_token);
+      scheduleRefresh(access_token);
       setAuthState(prev => ({
         ...prev,
         accessToken: access_token,
@@ -194,7 +211,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading: false,
         error: null
       }));
-  
+
       return response.data;
     } catch (error: any) {
       if (error.response?.status === 401 || error.response?.status === 403) {
@@ -245,6 +262,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ]);
 
       setAxiosAuthHeader(access_token);
+      scheduleRefresh(access_token);
       setAuthState({
         accessToken: access_token,
         refreshToken: refresh_token,
@@ -269,6 +287,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     try {
       await Storage.multiRemove([
         'accessToken', 
