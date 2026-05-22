@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
@@ -113,6 +113,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     error: null,
   });
 
+  // C-06: evita múltiples refresh paralelos cuando llegan varios 401 a la vez
+  const refreshPromiseRef = useRef<Promise<any> | null>(null);
+  // A-02: ref para que el interceptor lea el token fresco sin re-montarse
+  const refreshTokenRef   = useRef<string | null>(authState.refreshToken);
+
+  useEffect(() => {
+    refreshTokenRef.current = authState.refreshToken;
+  }, [authState.refreshToken]);
+
   const setAxiosAuthHeader = (token: string | null) => {
     if (token) {
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
@@ -132,6 +141,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const refreshAccessToken = async (tokenToUse?: string) => {
+    if (refreshPromiseRef.current) return refreshPromiseRef.current;
+
+    refreshPromiseRef.current = (async () => {
     try {
       let refreshToken = tokenToUse || authState.refreshToken;
       
@@ -189,7 +201,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await logout();
       }
       throw error;
+    } finally {
+      refreshPromiseRef.current = null;
     }
+    })();
+
+    return refreshPromiseRef.current;
   };
 
   const login = async (username: string, password: string): Promise<boolean> => {
@@ -210,9 +227,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const { access_token, refresh_token, expires_in } = response.data;
       const decodedToken = jwtDecode<any>(access_token);
-
-      console.log('Decoded token:', decodedToken);
-      console.log('Roles from token:', decodedToken.realm_access?.roles);
 
       const userRoles = decodedToken.realm_access?.roles || [];
       const isRoot  = userRoles.includes('root');
@@ -351,9 +365,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       async error => {
         const originalRequest = error.config;
         if (
-          error.response?.status === 401 && 
-          !originalRequest._retry && 
-          authState.refreshToken
+          error.response?.status === 401 &&
+          !originalRequest._retry &&
+          refreshTokenRef.current
         ) {
           originalRequest._retry = true;
           try {
@@ -372,7 +386,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       axios.interceptors.response.eject(interceptor);
     };
-  }, [authState.refreshToken]);
+  }, []); // deps vacías — se monta una sola vez, lee el token desde refreshTokenRef
 
   if (authState.loading) {
     return <SplashScreen />;
