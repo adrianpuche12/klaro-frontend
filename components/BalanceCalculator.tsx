@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Modal, ScrollView, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, Modal, ScrollView } from 'react-native';
 import { Button, Card, Title, Text, TextInput, IconButton } from 'react-native-paper';
 import { DatePickerModal } from 'react-native-paper-dates';
 import { format } from 'date-fns';
+import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../theme';
 
 interface Transaction {
   id: number;
@@ -26,52 +27,33 @@ interface BalanceState {
   expenses: number;
 }
 
-const BalanceCalculator: React.FC<BalanceCalculatorProps> = ({ 
-  visible, 
-  onDismiss, 
-  transactions,
-  onEdit,
-  onDelete
+const BalanceCalculator: React.FC<BalanceCalculatorProps> = ({
+  visible, onDismiss, transactions, onEdit, onDelete
 }) => {
-  const [startDate, setStartDate] = useState<Date | undefined>(undefined);
-  const [endDate, setEndDate] = useState<Date | undefined>(undefined);
+  const [startDate, setStartDate]             = useState<Date | undefined>(undefined);
+  const [endDate, setEndDate]                 = useState<Date | undefined>(undefined);
   const [datePickerVisible, setDatePickerVisible] = useState(false);
   const [selectedDateField, setSelectedDateField] = useState<'start' | 'end'>('start');
-  const [balance, setBalance] = useState<BalanceState>({ 
-    total: 0, 
-    incomes: 0, 
-    expenses: 0 
-  });
+  const [balance, setBalance]                 = useState<BalanceState>({ total: 0, incomes: 0, expenses: 0 });
   const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
 
   useEffect(() => {
-    if (startDate && endDate && transactions) {
-      calculateBalanceAndFilter();
-    }
+    if (startDate && endDate && transactions) calculateBalanceAndFilter();
   }, [startDate, endDate, transactions]);
 
   const calculateBalanceAndFilter = () => {
     if (!startDate || !endDate) return;
-
-    const filtered = transactions.filter(transaction => {
-      const transactionDate = new Date(transaction.date);
-      return transactionDate >= startDate && transactionDate <= endDate;
+    const filtered = transactions.filter(t => {
+      const d = new Date(t.date);
+      return d >= startDate && d <= endDate;
     });
-
     setFilteredTransactions(filtered);
-
     const result = filtered.reduce((acc: BalanceState, curr) => {
       const amount = parseFloat(curr.amount.toString());
-      if (curr.type === 'income') {
-        acc.incomes += amount;
-        acc.total += amount;
-      } else if (curr.type === 'expense') {
-        acc.expenses += amount;
-        acc.total -= amount;
-      }
+      if (curr.type === 'income')       { acc.incomes += amount; acc.total += amount; }
+      else if (curr.type === 'expense') { acc.expenses += amount; acc.total -= amount; }
       return acc;
     }, { total: 0, incomes: 0, expenses: 0 });
-
     setBalance(result);
   };
 
@@ -80,17 +62,10 @@ const BalanceCalculator: React.FC<BalanceCalculatorProps> = ({
     setDatePickerVisible(true);
   };
 
-  const onDismissDatePicker = () => {
-    setDatePickerVisible(false);
-  };
-
   const onConfirmDate = ({ date }: { date: Date | undefined }) => {
     if (date) {
-      if (selectedDateField === 'start') {
-        setStartDate(date);
-      } else {
-        setEndDate(date);
-      }
+      if (selectedDateField === 'start') setStartDate(date);
+      else setEndDate(date);
     }
     setDatePickerVisible(false);
   };
@@ -108,25 +83,16 @@ const BalanceCalculator: React.FC<BalanceCalculatorProps> = ({
   };
 
   return (
-    <Modal
-      visible={visible}
-      onDismiss={onDismiss}
-      transparent={true}
-      animationType="slide"
-    >
+    <Modal visible={visible} onDismiss={onDismiss} transparent animationType="slide">
       <View style={styles.modalContainer}>
         <Card style={styles.card}>
           <View style={styles.header}>
             <Title style={styles.title}>Cálculo de Balance</Title>
-            <Button 
-              mode="contained" 
-              onPress={onDismiss}
-              style={styles.closeButton}
-            >
+            <Button mode="contained" onPress={onDismiss} style={styles.closeButton}>
               Cerrar
             </Button>
           </View>
-          
+
           <ScrollView style={styles.scrollContent}>
             <Card.Content>
               <View style={styles.dateInputContainer}>
@@ -138,7 +104,6 @@ const BalanceCalculator: React.FC<BalanceCalculatorProps> = ({
                   showSoftInputOnFocus={false}
                   right={<TextInput.Icon icon="calendar" onPress={() => handleDateSelect('start')} />}
                 />
-
                 <TextInput
                   label="Fecha Fin"
                   value={formatDate(endDate)}
@@ -150,11 +115,7 @@ const BalanceCalculator: React.FC<BalanceCalculatorProps> = ({
               </View>
 
               {(startDate || endDate) && (
-                <Button 
-                  mode="outlined" 
-                  onPress={clearDates}
-                  style={styles.clearButton}
-                >
+                <Button mode="outlined" onPress={clearDates} style={styles.clearButton}>
                   Limpiar fechas
                 </Button>
               )}
@@ -164,10 +125,7 @@ const BalanceCalculator: React.FC<BalanceCalculatorProps> = ({
                   <View style={styles.balanceContainer}>
                     <Text style={styles.balanceText}>Ingresos: L{balance.incomes.toFixed(2)}</Text>
                     <Text style={styles.balanceText}>Egresos: L{balance.expenses.toFixed(2)}</Text>
-                    <Text style={[
-                      styles.balanceTotal, 
-                      { color: balance.total >= 0 ? '#4CAF50' : '#F44336' }
-                    ]}>
+                    <Text style={[styles.balanceTotal, { color: balance.total >= 0 ? COLOR.income : COLOR.expense }]}>
                       Balance Total: L{balance.total.toFixed(2)}
                     </Text>
                   </View>
@@ -175,13 +133,13 @@ const BalanceCalculator: React.FC<BalanceCalculatorProps> = ({
                   <Title style={styles.subtitle}>Transacciones en el período</Title>
                   {filteredTransactions.length > 0 ? (
                     <View style={styles.transactionsList}>
-                      {filteredTransactions.map((transaction) => (
+                      {filteredTransactions.map(transaction => (
                         <Card key={transaction.id} style={styles.transactionCard}>
                           <Card.Content>
                             <View style={styles.transactionHeader}>
                               <Text style={[
                                 styles.transactionType,
-                                { color: transaction.type === 'income' ? '#4CAF50' : '#F44336' }
+                                { color: transaction.type === 'income' ? COLOR.income : COLOR.expense },
                               ]}>
                                 {transaction.type === 'income' ? '↑' : '↓'} {transaction.type}
                               </Text>
@@ -189,31 +147,21 @@ const BalanceCalculator: React.FC<BalanceCalculatorProps> = ({
                                 L{parseFloat(transaction.amount.toString()).toFixed(2)}
                               </Text>
                             </View>
-                            <Text style={styles.transactionDate}>
-                              Fecha: {formatDate(transaction.date)}
-                            </Text>
-                            <Text style={styles.transactionDescription}>
-                              {transaction.description}
-                            </Text>
+                            <Text style={styles.transactionDate}>Fecha: {formatDate(transaction.date)}</Text>
+                            <Text style={styles.transactionDescription}>{transaction.description}</Text>
                             <View style={styles.actionButtons}>
                               <IconButton
                                 icon="pencil"
                                 mode="contained"
                                 size={20}
-                                onPress={() => {
-                                  onEdit(transaction);
-                                  onDismiss();
-                                }}
+                                onPress={() => { onEdit(transaction); onDismiss(); }}
                               />
                               <IconButton
                                 icon="delete"
                                 mode="contained"
                                 size={20}
-                                iconColor="#dc3545"
-                                onPress={() => {
-                                  onDelete(transaction);
-                                  onDismiss();
-                                }}
+                                iconColor={COLOR.expense}
+                                onPress={() => { onDelete(transaction); onDismiss(); }}
                               />
                             </View>
                           </Card.Content>
@@ -235,7 +183,7 @@ const BalanceCalculator: React.FC<BalanceCalculatorProps> = ({
           locale="es"
           mode="single"
           visible={datePickerVisible}
-          onDismiss={onDismissDatePicker}
+          onDismiss={() => setDatePickerVisible(false)}
           date={selectedDateField === 'start' ? startDate : endDate}
           onConfirm={onConfirmDate}
         />
@@ -249,101 +197,101 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    padding: 20,
+    backgroundColor: COLOR.overlay,
+    padding: SPACE.s5,
   },
   card: {
     width: '100%',
     maxWidth: 400,
     maxHeight: '90%',
-    borderRadius: 8,
+    borderRadius: RADIUS.r2,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
+    padding: SPACE.s4,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: COLOR.border,
   },
   title: {
-    fontSize: 24,
+    fontSize: FONT_SIZE.h2,
     flex: 1,
   },
   closeButton: {
-    marginLeft: 16,
+    marginLeft: SPACE.s4,
   },
   scrollContent: {
     flexGrow: 1,
   },
   subtitle: {
-    fontSize: 18,
-    marginVertical: 10,
+    fontSize: FONT_SIZE.h3,
+    marginVertical: SPACE.s2,
   },
   dateInputContainer: {
-    marginBottom: 10,
+    marginBottom: SPACE.s2,
   },
   input: {
-    marginBottom: 16,
+    marginBottom: SPACE.s4,
   },
   clearButton: {
-    marginBottom: 16,
+    marginBottom: SPACE.s4,
   },
   balanceContainer: {
-    marginTop: 20,
-    marginBottom: 20,
-    padding: 15,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
+    marginTop: SPACE.s5,
+    marginBottom: SPACE.s5,
+    padding: SPACE.s4,
+    backgroundColor: COLOR.bg,
+    borderRadius: RADIUS.r2,
   },
   balanceText: {
-    fontSize: 16,
-    marginBottom: 8,
+    fontSize: FONT_SIZE.body,
+    marginBottom: SPACE.s2,
   },
   balanceTotal: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginTop: 8,
+    fontSize: FONT_SIZE.h3,
+    fontWeight: FONT_WEIGHT.bold as any,
+    marginTop: SPACE.s2,
   },
   transactionsList: {
-    marginTop: 10,
+    marginTop: SPACE.s2,
   },
   transactionCard: {
-    marginBottom: 10,
+    marginBottom: SPACE.s2,
     elevation: 2,
   },
   transactionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 5,
+    marginBottom: SPACE.s1,
   },
   transactionType: {
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: FONT_SIZE.body,
+    fontWeight: FONT_WEIGHT.bold as any,
   },
   transactionAmount: {
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: FONT_SIZE.body,
+    fontWeight: FONT_WEIGHT.bold as any,
   },
   transactionDate: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 5,
+    fontSize: FONT_SIZE.label,
+    color: COLOR.inkMute,
+    marginBottom: SPACE.s1,
   },
   transactionDescription: {
-    fontSize: 14,
+    fontSize: FONT_SIZE.label,
   },
   actionButtons: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: 8,
-    marginTop: 8,
+    marginTop: SPACE.s2,
   },
   noTransactions: {
     textAlign: 'center',
-    marginTop: 20,
-    color: '#666',
+    marginTop: SPACE.s5,
+    color: COLOR.inkMute,
     fontStyle: 'italic',
   },
 });

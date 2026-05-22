@@ -1608,7 +1608,7 @@ const buildImageUrl = (imagePath: string | undefined): string | null => {
               style={{ width: '90%', height: '75%', resizeMode: 'contain', borderRadius: 8 }}
             />
           )}
-          <Text style={{ color: '#fff', marginTop: 16, fontSize: 13, opacity: 0.7 }}>
+          <Text style={{ color: COLOR.surface, marginTop: 16, fontSize: 13, opacity: 0.7 }}>
             Tocá para cerrar
           </Text>
         </TouchableOpacity>

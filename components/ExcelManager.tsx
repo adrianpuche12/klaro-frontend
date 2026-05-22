@@ -16,7 +16,7 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { exportToExcel, createImportTemplate, importFromExcel, TRANSACTION_LABELS } from '../utils/ExcelUtils';
-import { COLOR } from '../theme';
+import { COLOR, FONT_SIZE, FONT_WEIGHT, RADIUS } from '../theme';
 import { REACT_APP_API_URL } from '../config';
 
 interface ExcelManagerProps {
@@ -485,34 +485,34 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   title: {
-    fontSize: 24,
+    fontSize: FONT_SIZE.h2,
     textAlign: 'center',
     marginVertical: 15,
-    color: '#333',
+    color: COLOR.ink,
   },
   content: {
     flexGrow: 1,
   },
   section: {
     marginBottom: 15,
-    borderRadius: 8,
+    borderRadius: RADIUS.r2,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: FONT_SIZE.h3,
     marginBottom: 10,
-    color: '#444',
+    color: COLOR.ink2,
   },
   paragraph: {
     marginBottom: 15,
-    color: '#666',
+    color: COLOR.inkMute,
   },
   dateRangeContainer: {
     marginBottom: 15,
   },
   dateRangeLabel: {
-    fontSize: 14,
+    fontSize: FONT_SIZE.label,
     marginBottom: 8,
-    color: '#555',
+    color: COLOR.inkMute,
   },
   dateButton: {
     marginBottom: 5,
@@ -525,15 +525,15 @@ const styles = StyleSheet.create({
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: COLOR.overlay,
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 2,
   },
   loadingText: {
-    color: 'white',
+    color: COLOR.surface,
     marginTop: 10,
-    fontSize: 16,
+    fontSize: FONT_SIZE.body,
   },
   documentationDialog: {
     maxWidth: 500,
@@ -543,64 +543,64 @@ const styles = StyleSheet.create({
     maxHeight: 400,
   },
   docTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: FONT_SIZE.body,
+    fontWeight: FONT_WEIGHT.bold as any,
     marginVertical: 10,
-    color: '#444',
+    color: COLOR.ink2,
   },
   docSubtitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
+    fontSize: FONT_SIZE.label,
+    fontWeight: FONT_WEIGHT.bold as any,
     marginTop: 8,
     marginBottom: 4,
-    color: '#555',
+    color: COLOR.inkMute,
   },
   docText: {
-    fontSize: 14,
+    fontSize: FONT_SIZE.label,
     marginBottom: 5,
-    color: '#555',
+    color: COLOR.inkMute,
     lineHeight: 20,
   },
   tableHeader: {
     flexDirection: 'row',
-    backgroundColor: '#f0f0f0',
+    backgroundColor: COLOR.bg,
     borderBottomWidth: 1,
-    borderBottomColor: '#ddd',
+    borderBottomColor: COLOR.border2,
     paddingVertical: 8,
     marginTop: 10,
   },
   tableHeaderCell: {
     flex: 1,
-    fontWeight: 'bold',
+    fontWeight: FONT_WEIGHT.bold as any,
     textAlign: 'center',
-    color: '#444',
+    color: COLOR.ink2,
   },
   tableRow: {
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: COLOR.border,
     paddingVertical: 8,
   },
   tableCell: {
     flex: 1,
     textAlign: 'center',
-    color: '#555',
+    color: COLOR.inkMute,
   },
   errorsList: {
     marginTop: 10,
-    backgroundColor: '#f8f8f8',
+    backgroundColor: COLOR.bg,
     padding: 10,
-    borderRadius: 5,
+    borderRadius: RADIUS.r1,
   },
   errorTitle: {
-    fontWeight: 'bold',
+    fontWeight: FONT_WEIGHT.bold as any,
     marginBottom: 5,
-    color: '#d32f2f',
+    color: COLOR.expense,
   },
   errorItem: {
     fontSize: 12,
     marginBottom: 3,
-    color: '#555',
+    color: COLOR.inkMute,
   },
 });
 
