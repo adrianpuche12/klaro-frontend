@@ -1,41 +1,13 @@
-let currentHost = 'localhost';
-let currentPort = '';
+// Variables de entorno Expo — prefijo EXPO_PUBLIC_ las expone al bundle del cliente.
+// Fallbacks = valores actuales (dev). Para producción: sobreescribir en .env o en EAS.
+const KEYCLOAK_SERVER = process.env.EXPO_PUBLIC_KEYCLOAK_URL   ?? 'http://62.171.160.238:8095';
+const KEYCLOAK_REALM  = process.env.EXPO_PUBLIC_KEYCLOAK_REALM ?? 'klaro-dev';
+const API_BASE        = process.env.EXPO_PUBLIC_API_URL        ?? 'https://klaro-backend-production-8383.up.railway.app';
 
-if (typeof window !== 'undefined' && window.location) {
-    currentHost = window.location.hostname;
-    currentPort = window.location.port;
-}
+export const REACT_APP_API_URL        = API_BASE;
+export const R2_PUBLIC_URL            = 'https://pub-333e5c6f14214d6cb7c0e192a9aadd85.r2.dev';
+export const API_KEYCLOAK_ADAPTER_URL = `${KEYCLOAK_SERVER}/realms/${KEYCLOAK_REALM}/protocol/openid-connect`;
 
-let keycloakUrl: string;
-let keycloakRealm: string;
-let apiUrl: string;
-
-const RAILWAY_DEV_URL  = 'https://klaro-backend-production-8383.up.railway.app';
-const RAILWAY_PROD_URL = 'https://klaro-backend-production-8383.up.railway.app'; // reemplazar con URL PROD cuando exista
-const KEYCLOAK_SERVER  = 'http://62.171.160.238:8095';
-
-if (currentHost === RAILWAY_PROD_URL.replace('https://', '')) {
-    // Frontend en PROD
-    keycloakUrl   = KEYCLOAK_SERVER;
-    keycloakRealm = 'klaro-prod';
-    apiUrl        = RAILWAY_PROD_URL;
-} else {
-    // Local y DEV apuntan al backend Railway DEV
-    keycloakUrl   = KEYCLOAK_SERVER;
-    keycloakRealm = 'klaro-dev';
-    apiUrl        = RAILWAY_DEV_URL;
-}
-
-export const KEYCLOAK_URL      = keycloakUrl;
-export const KEYCLOAK_REALM    = keycloakRealm;
-export const REACT_APP_API_URL = apiUrl;
-
-// Cloudflare R2 — URL pública para ver comprobantes
-export const R2_PUBLIC_URL = 'https://pub-333e5c6f14214d6cb7c0e192a9aadd85.r2.dev';
-
-// Endpoint de token Keycloak (OpenID Connect directo)
-export const API_KEYCLOAK_ADAPTER_URL = `${keycloakUrl}/realms/${keycloakRealm}/protocol/openid-connect`;
-
-if (typeof window !== 'undefined') {
-    console.log('Klaro Config:', { keycloakUrl, keycloakRealm, apiUrl });
+if (__DEV__) {
+  console.log('[Klaro] Config activa:', { KEYCLOAK_SERVER, KEYCLOAK_REALM, API_BASE });
 }

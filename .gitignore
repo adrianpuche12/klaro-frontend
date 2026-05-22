@@ -36,3 +36,9 @@ yarn-error.*
 *.tsbuildinfo
 
 app-example
+
+# IDE
+.idea/
+
+# Notas locales
+archivos_importantes.txt

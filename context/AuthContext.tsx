@@ -4,6 +4,7 @@ import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 import { API_KEYCLOAK_ADAPTER_URL } from '../config';
 import { Platform } from 'react-native';
+import { SplashScreen } from '../components/SplashScreen';
 
 
 interface AuthState {
@@ -374,7 +375,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [authState.refreshToken]);
 
   if (authState.loading) {
-    return null;
+    return <SplashScreen />;
   }
 
   return (

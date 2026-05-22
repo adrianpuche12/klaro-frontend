@@ -47,7 +47,7 @@ const tooltipStyles = StyleSheet.create({
     color: COLOR.white,
     fontSize: FONT_SIZE.label,
     fontWeight: FONT_WEIGHT.medium as any,
-    whiteSpace: 'nowrap' as any,
+    ...(Platform.OS === 'web' ? { whiteSpace: 'nowrap' as any } : {}),
   },
 });
 
