@@ -1,7 +1,7 @@
 import React from 'react';
 import { useWindowDimensions, StyleSheet } from 'react-native';
 import { Button } from 'react-native-paper';
-import { COLOR, RADIUS } from '../../theme';
+import { COLOR, RADIUS, BREAKPOINT } from '../../theme';
 
 interface ResponsiveButtonProps {
   title: string;
@@ -23,7 +23,7 @@ const ResponsiveButton: React.FC<ResponsiveButtonProps> = ({
       labelStyle={{ color: COLOR.inkOnBrand }}
       style={[
         styles.button,
-        width > 768 ? styles.desktopButton : styles.mobileButton,
+        width >= BREAKPOINT.desktop ? styles.desktopButton : styles.mobileButton,
         { backgroundColor: bgColor },
       ]}
     >

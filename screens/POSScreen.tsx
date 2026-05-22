@@ -13,6 +13,7 @@ import { REACT_APP_API_URL } from '../config';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { formatHnl } from '../utils/format';
+import { stockColor } from '../utils/stockStatus';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -284,11 +285,6 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
       clearCart();
     } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error al confirmar cierre'); }
   };
-
-  // ── Stock color ───────────────────────────────────────────────────────────
-
-  const stockColor = (item: StockItem) =>
-    item.quantity === 0 ? COLOR.expense : item.lowStock ? COLOR.warn : COLOR.income;
 
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER

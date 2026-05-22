@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, useWindowDimensions, Platform } from 'react-native';
 import { Surface, Text, IconButton } from 'react-native-paper';
-import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../theme';
+import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, BREAKPOINT } from '../theme';
 
 interface Transaction {
   id: number;
@@ -20,7 +20,7 @@ interface BalanceSummaryProps {
 
 const BalanceSummary: React.FC<BalanceSummaryProps> = ({ transactions, storeName }) => {
   const { width } = useWindowDimensions();
-  const isMobile = width < 768;
+  const isMobile = width < BREAKPOINT.desktop;
 
   const balance = transactions.reduce((acc, curr) => {
     const amount = parseFloat(curr.amount.toString());

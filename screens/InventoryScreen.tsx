@@ -13,6 +13,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { useAuth } from '../context/AuthContext';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, CONTROL } from '../theme';
 import { formatHnl } from '../utils/format';
+import { stockColor } from '../utils/stockStatus';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -537,14 +538,6 @@ const InventoryScreen = () => {
       </Text>
     </View>
   );
-
-  // ── Stock color ──────────────────────────────────────────────────────────────
-
-  const stockColor = (item: StockItem) => {
-    if (item.quantity === 0) return COLOR.expense;
-    if (item.lowStock)       return COLOR.warn;
-    return COLOR.income;
-  };
 
   // ── Render fila de producto ──────────────────────────────────────────────────
 
