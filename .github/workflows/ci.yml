@@ -1,0 +1,35 @@
+name: CI — Klaro Frontend
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  typecheck:
+    name: TypeScript + Build Web
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Verificar build web
+        run: npx expo export --platform web
+        env:
+          EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || 'https://klaro-backend-production-8383.up.railway.app' }}
+          EXPO_PUBLIC_KEYCLOAK_URL: ${{ vars.EXPO_PUBLIC_KEYCLOAK_URL || 'http://62.171.160.238:8095' }}
+          EXPO_PUBLIC_KEYCLOAK_REALM: ${{ vars.EXPO_PUBLIC_KEYCLOAK_REALM || 'klaro-dev' }}
