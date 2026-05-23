@@ -343,7 +343,7 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
       {/* ══ HEADER ══ */}
       <View style={styles.header}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.headerBrand}>{shift.store?.name ?? 'Klaro'}</Text>
+          <Text style={styles.headerBrand}>{shift.storeName ?? 'Klaro'}</Text>
           <Text style={styles.headerShift} numberOfLines={1}>● {shift.code} · {shift.username}</Text>
         </View>
 
