@@ -1,19 +1,19 @@
 {
   "expo": {
-    "name": "Klaro",
-    "slug": "klaro",
+    "name": "Belopia",
+    "slug": "belopia",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "klaro",
+    "scheme": "belopia",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.nilosolutions.klaro"
+      "bundleIdentifier": "com.nilosolutions.belopia"
     },
     "android": {
-      "package": "com.nilosolutions.klaro",
+      "package": "com.nilosolutions.belopia",
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
