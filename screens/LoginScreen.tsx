@@ -56,7 +56,7 @@ const LoginScreen = () => {
             source={require('../assets/images/icon.png')}
             style={styles.logo}
           />
-          <Title style={styles.welcomeText}>Klaro</Title>
+          <Title style={styles.welcomeText}>Belopia</Title>
         </View>
 
         {/* Card del formulario */}
