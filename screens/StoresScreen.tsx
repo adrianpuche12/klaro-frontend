@@ -8,6 +8,7 @@ import {
   Modal,
 } from 'react-native';
 import { Button, TextInput, Snackbar, IconButton } from 'react-native-paper';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -155,8 +156,18 @@ const StoresScreen = () => {
                       </Text>
                     </View>
                   </View>
-                  {store.address ? <Text style={styles.storeDetail}>📍 {store.address}</Text> : null}
-                  {store.phone   ? <Text style={styles.storeDetail}>📞 {store.phone}</Text> : null}
+                  {store.address ? (
+                    <View style={styles.storeDetailRow}>
+                      <MaterialCommunityIcons name="map-marker-outline" size={13} color={COLOR.inkMute} />
+                      <Text style={styles.storeDetail}>{store.address}</Text>
+                    </View>
+                  ) : null}
+                  {store.phone ? (
+                    <View style={styles.storeDetailRow}>
+                      <MaterialCommunityIcons name="phone-outline" size={13} color={COLOR.inkMute} />
+                      <Text style={styles.storeDetail}>{store.phone}</Text>
+                    </View>
+                  ) : null}
                 </View>
 
                 <View style={styles.cardActions}>
@@ -171,7 +182,7 @@ const StoresScreen = () => {
                   <IconButton
                     icon={store.active ? 'toggle-switch' : 'toggle-switch-off'}
                     size={22}
-                    iconColor={store.active ? '#168542' : '#b8c0cc'}
+                    iconColor={store.active ? COLOR.income : COLOR.inkDisabled}
                     onPress={() => handleToggle(store)}
                   />
                   {/* Eliminar */}
@@ -230,7 +241,8 @@ const styles = StyleSheet.create({
   cardInfo:     { flex: 1 },
   cardRow:      { flexDirection: 'row', alignItems: 'center', gap: SPACE.s2, marginBottom: SPACE.s1 },
   storeName:    { fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
-  storeDetail:  { fontSize: FONT_SIZE.label, color: COLOR.inkMute, marginTop: 2 },
+  storeDetail:     { fontSize: FONT_SIZE.label, color: COLOR.inkMute, marginLeft: 4 },
+  storeDetailRow:  { flexDirection: 'row', alignItems: 'center', marginTop: 3 },
   badge:        { borderRadius: RADIUS.r1, paddingHorizontal: SPACE.s2, paddingVertical: 2 },
   badgeActive:  { backgroundColor: COLOR.incomeTint },
   badgeInactive:{ backgroundColor: COLOR.expenseTint },

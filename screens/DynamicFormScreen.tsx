@@ -38,7 +38,7 @@ const BACKEND_URL = `${REACT_APP_API_URL}/api/forms`;
 const TRANSACTIONS_URL = `${REACT_APP_API_URL}/transactions`;
 
 const DynamicFormScreen = () => {
-  const { userName } = useAuth();
+  const { userName, accessToken } = useAuth();
   const [activeTab, setActiveTab] = useState<'form' | 'historial'>('form');
 
   // ── Historial de operaciones del usuario ────────────────────────────────────
@@ -58,7 +58,8 @@ const DynamicFormScreen = () => {
     const page = reset ? 0 : histPage;
     try {
       const res = await fetch(
-        `${REACT_APP_API_URL}/api/operations/mine?username=${userName}&page=${page}&size=${HIST_SIZE}`
+        `${REACT_APP_API_URL}/api/operations/mine?username=${userName}&page=${page}&size=${HIST_SIZE}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
       );
       const data: OperacionHistorial[] = await res.json();
       setHistorial(prev => reset ? data : [...prev, ...data]);
@@ -149,7 +150,7 @@ const DynamicFormScreen = () => {
   // Cargar locales activos y distribuir el porcentaje en partes iguales
   useEffect(() => {
     const STORES_URL = `${REACT_APP_API_URL}/api/v2/stores/active`;
-    fetch(STORES_URL)
+    fetch(STORES_URL, { headers: { Authorization: `Bearer ${accessToken}` } })
       .then(r => r.json())
       .then((stores: { id: number; name: string }[]) => {
         if (!stores.length) return;
@@ -379,6 +380,7 @@ const DynamicFormScreen = () => {
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify(basePayload),
       });
@@ -1044,8 +1046,9 @@ const DynamicFormScreen = () => {
                 contentStyle={styles.buttonContent}
                 labelStyle={styles.buttonText}
                 buttonColor={COLOR.warn}
+              icon="refresh"
               >
-                ↻ LIMPIAR FORMULARIO
+                LIMPIAR FORMULARIO
               </Button>
             </View>
           </Card.Content>
@@ -1103,16 +1106,6 @@ const styles = StyleSheet.create({
     paddingVertical: SPACE.s3,
     alignItems: 'center',
   },
-  logoContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACE.s3,
-  },
-  logo: {
-    backgroundColor: COLOR.surface,
-    borderWidth: 2,
-    borderColor: COLOR.surface,
-  },
   welcomeText: {
     color: COLOR.brandDeep,
     fontSize: FONT_SIZE.display,
@@ -1155,20 +1148,6 @@ const styles = StyleSheet.create({
   },
   radioLabel: {
     fontSize: FONT_SIZE.h3,
-    color: COLOR.ink2,
-  },
-  fixedTypeContainer: {
-    backgroundColor: COLOR.bgAlt,
-    padding: SPACE.s3,
-    borderRadius: RADIUS.r1,
-    alignItems: 'center',
-    marginBottom: SPACE.s4,
-    borderWidth: 1,
-    borderColor: COLOR.brand,
-  },
-  fixedTypeLabel: {
-    fontSize: FONT_SIZE.h3,
-    fontWeight: FONT_WEIGHT.bold as any,
     color: COLOR.ink2,
   },
   supplierListContainer: {
@@ -1240,28 +1219,6 @@ const styles = StyleSheet.create({
     marginBottom: SPACE.s4,
     textAlign: 'center',
   },
-  totalAmount: {
-    fontSize: FONT_SIZE.h3,
-    color: COLOR.info,
-    fontWeight: FONT_WEIGHT.bold as any,
-    textAlign: 'center',
-    marginBottom: SPACE.s4,
-  },
-  quickButtonsContainer: {
-    marginBottom: SPACE.s4,
-  },
-  quickButtonsLabel: {
-    fontSize: FONT_SIZE.caption,
-    color: COLOR.ink2,
-    marginBottom: SPACE.s3,
-    textAlign: 'center',
-  },
-  quickButtons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: SPACE.s2,
-  },
   quickButton: {
     backgroundColor: COLOR.infoTint,
     paddingVertical: 4,
@@ -1274,11 +1231,6 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.caption,
     color: COLOR.info,
     fontWeight: FONT_WEIGHT.medium as any,
-  },
-  localesContainer: {
-    flexDirection: 'row',
-    gap: SPACE.s3,
-    marginBottom: SPACE.s4,
   },
   localCard: {
     flex: 1,

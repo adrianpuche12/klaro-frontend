@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, useWindowDimensions, Platform } from 'react-native';
 import { Surface, Text, IconButton } from 'react-native-paper';
+import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, BREAKPOINT } from '../theme';
 
 interface Transaction {
   id: number;
@@ -19,7 +20,7 @@ interface BalanceSummaryProps {
 
 const BalanceSummary: React.FC<BalanceSummaryProps> = ({ transactions, storeName }) => {
   const { width } = useWindowDimensions();
-  const isMobile = width < 768;
+  const isMobile = width < BREAKPOINT.desktop;
 
   const balance = transactions.reduce((acc, curr) => {
     const amount = parseFloat(curr.amount.toString());
@@ -35,28 +36,20 @@ const BalanceSummary: React.FC<BalanceSummaryProps> = ({ transactions, storeName
 
   return (
     <View style={styles.wrapper}>
-      <Surface 
+      <Surface
         style={[
           styles.container,
           isMobile ? styles.mobileContainer : styles.desktopContainer,
-        ]} 
+        ]}
         elevation={4}
       >
         <View style={styles.content}>
-          <Text style={[
-            styles.title,
-            isMobile && styles.mobileTitle
-          ]}>
+          <Text style={[styles.title, isMobile && styles.mobileTitle]}>
             {storeName ? `Balance de ${storeName}` : 'Balance General'}
           </Text>
 
           <View style={styles.row}>
-            <IconButton
-              icon="trending-up"
-              size={16}
-              iconColor="#4CAF50"
-              style={styles.icon}
-            />
+            <IconButton icon="trending-up" size={16} iconColor={COLOR.income} style={styles.icon} />
             <Text style={styles.label}>Ingresos</Text>
             <Text style={styles.incomeValue}>
               L{balance.incomes.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
@@ -64,12 +57,7 @@ const BalanceSummary: React.FC<BalanceSummaryProps> = ({ transactions, storeName
           </View>
 
           <View style={styles.row}>
-            <IconButton
-              icon="trending-down"
-              size={16}
-              iconColor="#f44336"
-              style={styles.icon}
-            />
+            <IconButton icon="trending-down" size={16} iconColor={COLOR.expense} style={styles.icon} />
             <Text style={styles.label}>Egresos</Text>
             <Text style={styles.expenseValue}>
               L{balance.expenses.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
@@ -80,14 +68,11 @@ const BalanceSummary: React.FC<BalanceSummaryProps> = ({ transactions, storeName
             <IconButton
               icon="currency-usd"
               size={16}
-              iconColor={balance.total >= 0 ? "#4CAF50" : "#f44336"}
+              iconColor={balance.total >= 0 ? COLOR.income : COLOR.expense}
               style={styles.icon}
             />
             <Text style={[styles.label, styles.totalLabel]}>Total</Text>
-            <Text style={[
-              styles.totalValue,
-              { color: balance.total >= 0 ? "#4CAF50" : "#f44336" }
-            ]}>
+            <Text style={[styles.totalValue, { color: balance.total >= 0 ? COLOR.income : COLOR.expense }]}>
               L{balance.total.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
             </Text>
           </View>
@@ -101,27 +86,20 @@ const styles = StyleSheet.create({
   wrapper: {
     alignItems: 'center',
     width: '100%',
-    marginVertical: 16,
+    marginVertical: SPACE.s4,
   },
   container: {
-    backgroundColor: 'white',
-    borderRadius: 12,
+    backgroundColor: COLOR.surface,
+    borderRadius: RADIUS.r3,
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
-        shadowOffset: {
-          width: 0,
-          height: 2,
-        },
+        shadowColor: COLOR.black,
+        shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.25,
         shadowRadius: 3.84,
       },
-      android: {
-        elevation: 5,
-      },
-      default: {
-        elevation: 4,
-      },
+      android: { elevation: 5 },
+      default: { elevation: 4 },
     }),
   },
   mobileContainer: {
@@ -134,29 +112,29 @@ const styles = StyleSheet.create({
     minWidth: 400,
   },
   content: {
-    padding: 16,
+    padding: SPACE.s4,
   },
   title: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: FONT_SIZE.h3,
+    fontWeight: FONT_WEIGHT.bold as any,
+    color: COLOR.ink,
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: SPACE.s3,
   },
   mobileTitle: {
-    fontSize: 16,
-    marginBottom: 8,
+    fontSize: FONT_SIZE.body,
+    marginBottom: SPACE.s2,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
+    paddingVertical: SPACE.s1,
   },
   totalRow: {
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-    marginTop: 4,
-    paddingTop: 8,
+    borderTopColor: COLOR.border,
+    marginTop: SPACE.s1,
+    paddingTop: SPACE.s2,
   },
   icon: {
     margin: 0,
@@ -164,30 +142,30 @@ const styles = StyleSheet.create({
   },
   label: {
     flex: 1,
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 4,
+    fontSize: FONT_SIZE.label,
+    color: COLOR.inkMute,
+    marginLeft: SPACE.s1,
   },
   totalLabel: {
-    fontWeight: '500',
+    fontWeight: FONT_WEIGHT.medium as any,
   },
   incomeValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#4CAF50',
+    fontSize: FONT_SIZE.label,
+    fontWeight: FONT_WEIGHT.semibold as any,
+    color: COLOR.income,
     minWidth: 120,
     textAlign: 'right',
   },
   expenseValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#f44336',
+    fontSize: FONT_SIZE.label,
+    fontWeight: FONT_WEIGHT.semibold as any,
+    color: COLOR.expense,
     minWidth: 120,
     textAlign: 'right',
   },
   totalValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: FONT_SIZE.body,
+    fontWeight: FONT_WEIGHT.bold as any,
     minWidth: 120,
     textAlign: 'right',
   },

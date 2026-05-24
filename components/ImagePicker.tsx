@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, StyleSheet, Image, Alert } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
 import { ImageService } from '../utils/ImageService';
+import { COLOR, FONT_SIZE, FONT_WEIGHT } from '../theme';
 
 interface SelectedImage {
   uri: string;
@@ -83,7 +84,7 @@ const ImagePicker: React.FC<ImagePickerProps> = ({
               icon="camera"
               style={styles.selectButton}
               disabled={disabled}
-              buttonColor="#D4A72B"
+              buttonColor={COLOR.brandDark}
             >
               Seleccionar Comprobante
             </Button>
@@ -99,10 +100,10 @@ const styles = StyleSheet.create({
     marginVertical: 10,
   },
   label: {
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: FONT_SIZE.body,
+    fontWeight: FONT_WEIGHT.bold as any,
     marginBottom: 10,
-    color: '#555',
+    color: COLOR.inkMute,
   },
   imageContainer: {
     alignItems: 'center',
@@ -136,7 +137,7 @@ const styles = StyleSheet.create({
   },
   uploadingText: {
     marginTop: 10,
-    color: '#666',
+    color: COLOR.inkMute,
   },
 });
 

@@ -1,9 +1,10 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 import { API_KEYCLOAK_ADAPTER_URL } from '../config';
 import { Platform } from 'react-native';
+import { SplashScreen } from '../components/SplashScreen';
 
 
 interface AuthState {
@@ -112,12 +113,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     error: null,
   });
 
+  // C-06: evita múltiples refresh paralelos cuando llegan varios 401 a la vez
+  const refreshPromiseRef = useRef<Promise<any> | null>(null);
+  // A-02: ref para que el interceptor lea el token fresco sin re-montarse
+  const refreshTokenRef   = useRef<string | null>(authState.refreshToken);
+  // C-07: timer para refresh proactivo antes de que expire el token
+  const refreshTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    refreshTokenRef.current = authState.refreshToken;
+  }, [authState.refreshToken]);
+
   const setAxiosAuthHeader = (token: string | null) => {
     if (token) {
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     } else {
       delete axios.defaults.headers.common['Authorization'];
     }
+  };
+
+  // C-07: programa un refresh proactivo ~60s antes del exp del token
+  const scheduleRefresh = (token: string) => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    try {
+      const decoded = jwtDecode<any>(token);
+      const msUntilRefresh = decoded.exp * 1000 - Date.now() - 60_000;
+      if (msUntilRefresh > 0) {
+        refreshTimerRef.current = setTimeout(() => {
+          refreshAccessToken().catch(() => {});
+        }, msUntilRefresh);
+      }
+    } catch {}
   };
 
   const isTokenExpiringSoon = (token: string): boolean => {
@@ -131,6 +157,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const refreshAccessToken = async (tokenToUse?: string) => {
+    if (refreshPromiseRef.current) return refreshPromiseRef.current;
+
+    refreshPromiseRef.current = (async () => {
     try {
       let refreshToken = tokenToUse || authState.refreshToken;
       
@@ -154,9 +183,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { access_token, refresh_token, expires_in } = response.data;
       const decodedToken = jwtDecode<any>(access_token);
       const userRoles = decodedToken.realm_access?.roles || [];
-      const isAdmin = userRoles.includes('admin') || userRoles.includes('root');
+      const isRoot  = userRoles.includes('root');
+      const isAdmin = userRoles.includes('admin');
       const userName = decodedToken.preferred_username;
       const userId = decodedToken.sub;
+      const appRoles = isRoot ? ['root'] : isAdmin ? ['admin'] : ['user'];
 
       await Storage.multiSet([
         ['accessToken', access_token],
@@ -164,29 +195,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ['expiresIn', expires_in.toString()],
         ['userName', userName],
         ['userId', userId],
-        ['roles', JSON.stringify(isAdmin ? ['admin'] : ['user'])],
+        ['roles', JSON.stringify(appRoles)],
       ]);
 
       setAxiosAuthHeader(access_token);
+      scheduleRefresh(access_token);
       setAuthState(prev => ({
         ...prev,
         accessToken: access_token,
         refreshToken: refresh_token,
         expiresIn: expires_in,
-        roles: isAdmin ? ['admin'] : ['user'],
+        roles: appRoles,
         userName,
         userId,
         loading: false,
         error: null
       }));
-  
+
       return response.data;
     } catch (error: any) {
       if (error.response?.status === 401 || error.response?.status === 403) {
         await logout();
       }
       throw error;
+    } finally {
+      refreshPromiseRef.current = null;
     }
+    })();
+
+    return refreshPromiseRef.current;
   };
 
   const login = async (username: string, password: string): Promise<boolean> => {
@@ -208,13 +245,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { access_token, refresh_token, expires_in } = response.data;
       const decodedToken = jwtDecode<any>(access_token);
 
-      console.log('Decoded token:', decodedToken);
-      console.log('Roles from token:', decodedToken.realm_access?.roles);
-
       const userRoles = decodedToken.realm_access?.roles || [];
-      const isAdmin = userRoles.includes('admin') || userRoles.includes('root');
+      const isRoot  = userRoles.includes('root');
+      const isAdmin = userRoles.includes('admin');
       const userName = decodedToken.preferred_username;
       const userId = decodedToken.sub;
+      const appRoles = isRoot ? ['root'] : isAdmin ? ['admin'] : ['user'];
 
       await Storage.multiSet([
         ['accessToken', access_token],
@@ -222,15 +258,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ['expiresIn', expires_in.toString()],
         ['userName', userName],
         ['userId', userId],
-        ['roles', JSON.stringify(isAdmin ? ['admin'] : ['user'])],
+        ['roles', JSON.stringify(appRoles)],
       ]);
 
       setAxiosAuthHeader(access_token);
+      scheduleRefresh(access_token);
       setAuthState({
         accessToken: access_token,
         refreshToken: refresh_token,
         expiresIn: expires_in,
-        roles: isAdmin ? ['admin'] : ['user'],
+        roles: appRoles,
         userName,
         userId,
         loading: false,
@@ -250,6 +287,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     try {
       await Storage.multiRemove([
         'accessToken', 
@@ -346,9 +384,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       async error => {
         const originalRequest = error.config;
         if (
-          error.response?.status === 401 && 
-          !originalRequest._retry && 
-          authState.refreshToken
+          error.response?.status === 401 &&
+          !originalRequest._retry &&
+          refreshTokenRef.current
         ) {
           originalRequest._retry = true;
           try {
@@ -367,7 +405,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       axios.interceptors.response.eject(interceptor);
     };
-  }, [authState.refreshToken]);
+  }, []); // deps vacías — se monta una sola vez, lee el token desde refreshTokenRef
 
   return (
     <AuthContext.Provider

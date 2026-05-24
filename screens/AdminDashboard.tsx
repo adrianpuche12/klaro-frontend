@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Text } from 'react-native';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import Sidebar, { SidebarScreen } from '../components/Sidebar';
-import { StoreProvider } from '../context/StoreContext';
-import { UIPreferencesProvider } from '../context/UIPreferencesContext';
 import { COLOR, SPACE, FONT_SIZE, FONT_WEIGHT, CONTROL, BREAKPOINT } from '../theme';
 import AdminScreen from './AdminScreen';
 import StoresScreen from './StoresScreen';
@@ -11,6 +10,7 @@ import POSScreen from './POSScreen';
 import SalesHistoryScreen from './SalesHistoryScreen';
 import DashboardScreen from './DashboardScreen';
 import UsersScreen from './UsersScreen';
+import TenantConfigScreen from './TenantConfigScreen';
 
 const SCREEN_TITLE: Record<SidebarScreen, string> = {
   dashboard:    'Dashboard',
@@ -20,6 +20,7 @@ const SCREEN_TITLE: Record<SidebarScreen, string> = {
   salesHistory: 'Historial ventas',
   users:        'Usuarios',
   sales:        'Ventas',
+  tenantConfig: 'Configuración',
 };
 
 const AdminDashboard = () => {
@@ -30,9 +31,7 @@ const AdminDashboard = () => {
   const [drawerOpen, setDrawerOpen]     = useState(false);
 
   return (
-    <UIPreferencesProvider>
-    <StoreProvider>
-      <View style={styles.container}>
+    <View style={styles.container}>
 
         {/* Sidebar fijo en desktop */}
         {isDesktop && (
@@ -55,7 +54,7 @@ const AdminDashboard = () => {
                 style={styles.menuBtn}
                 activeOpacity={0.7}
               >
-                <Text style={styles.menuBtnIcon}>☰</Text>
+                <MaterialCommunityIcons name="menu" size={24} color={COLOR.ink} />
               </TouchableOpacity>
               <Text style={styles.topbarTitle}>
                 {SCREEN_TITLE[activeScreen] ?? 'Menú'}
@@ -71,6 +70,7 @@ const AdminDashboard = () => {
           {activeScreen === 'stores'       && <StoresScreen />}
           {activeScreen === 'sales'        && <POSScreen />}
           {activeScreen === 'salesHistory' && <SalesHistoryScreen />}
+          {activeScreen === 'tenantConfig' && <TenantConfigScreen />}
         </View>
 
         {/* Drawer mobile */}
@@ -82,9 +82,7 @@ const AdminDashboard = () => {
             onClose={() => setDrawerOpen(false)}
           />
         )}
-      </View>
-    </StoreProvider>
-    </UIPreferencesProvider>
+    </View>
   );
 };
 
@@ -111,11 +109,6 @@ const styles = StyleSheet.create({
     borderBottomColor: COLOR.brandDark,
   },
   menuBtn:     { padding: SPACE.s1 },
-  menuBtnIcon: {
-    fontSize: 22,
-    fontWeight: FONT_WEIGHT.black as any,
-    color: COLOR.ink,
-  },
   topbarTitle: {
     fontSize: FONT_SIZE.h2,
     fontWeight: FONT_WEIGHT.bold as any,

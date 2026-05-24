@@ -12,7 +12,7 @@ import { useAuth } from '../../context/AuthContext';
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const { roles } = useAuth();
-  const isAdmin = roles.includes('admin');
+  const isAdmin = roles.includes('admin') || roles.includes('root');
 
   return (
     <Tabs

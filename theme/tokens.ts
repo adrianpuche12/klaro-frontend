@@ -1,5 +1,5 @@
 /**
- * DESIGN TOKENS — Pollos Hermanos / Proyecto Humberto V2
+ * DESIGN TOKENS — Klaro SaaS
  *
  * FUENTE DE VERDAD ÚNICA para toda la interfaz.
  * Cualquier cambio visual se hace aquí y se propaga automáticamente
@@ -13,12 +13,12 @@
 
 // ─── COLORES ─────────────────────────────────────────────────────────────────
 //
-// Paleta cálida. Brand = amarillo Pollos Hermanos (levemente suavizado).
+// Paleta cálida. Brand = dorado Klaro.
 // Fondo warm-white en lugar de gris frío.
 
 export const COLOR = {
   // ── Brand (amarillo PH) ───────────────────────────────────────────────────
-  brand:         '#F5C430',  // amarillo principal — identidad Pollos Hermanos
+  brand:         '#F5C430',  // dorado principal — identidad Klaro
   brandDark:     '#D4A520',  // versión oscura para estados presionados / hover
   brandDeep:     '#A68022',  // versión muy oscura para texto sobre brand
   brandTint:     '#FEF6D8',  // fondo amarillo muy suave (badges, highlights)
@@ -161,21 +161,21 @@ export const SHADOW = {
     elevation: 0,
   },
   sm: {
-    shadowColor: '#1F1B16',
+    shadowColor: COLOR.ink,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 3,
     elevation: 2,
   },
   md: {
-    shadowColor: '#1F1B16',
+    shadowColor: COLOR.ink,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.10,
     shadowRadius: 12,
     elevation: 6,
   },
   lg: {
-    shadowColor: '#1F1B16',
+    shadowColor: COLOR.ink,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.18,
     shadowRadius: 24,
