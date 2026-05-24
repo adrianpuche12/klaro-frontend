@@ -1,17 +1,20 @@
 {
   "expo": {
-    "name": "PH-Front",
-    "slug": "PH-Front",
+    "name": "Klaro",
+    "slug": "klaro",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "myapp",
+    "scheme": "klaro",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nilosolutions.klaro"
     },
     "android": {
+      "package": "com.nilosolutions.klaro",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"

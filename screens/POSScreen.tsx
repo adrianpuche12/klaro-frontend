@@ -13,6 +13,7 @@ import { REACT_APP_API_URL } from '../config';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { formatHnl } from '../utils/format';
+import { stockColor } from '../utils/stockStatus';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -285,11 +286,6 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
     } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error al confirmar cierre'); }
   };
 
-  // ── Stock color ───────────────────────────────────────────────────────────
-
-  const stockColor = (item: StockItem) =>
-    item.quantity === 0 ? COLOR.expense : item.lowStock ? COLOR.warn : COLOR.income;
-
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
@@ -347,7 +343,7 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
       {/* ══ HEADER ══ */}
       <View style={styles.header}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.headerBrand}>Pollos Hermanos</Text>
+          <Text style={styles.headerBrand}>{shift.storeName ?? 'Klaro'}</Text>
           <Text style={styles.headerShift} numberOfLines={1}>● {shift.code} · {shift.username}</Text>
         </View>
 

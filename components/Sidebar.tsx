@@ -47,7 +47,7 @@ const tooltipStyles = StyleSheet.create({
     color: COLOR.white,
     fontSize: FONT_SIZE.label,
     fontWeight: FONT_WEIGHT.medium as any,
-    // whiteSpace not in RN types, applied via web stylesheet directly
+    ...(Platform.OS === 'web' ? { whiteSpace: 'nowrap' as any } : {}),
   },
 });
 
@@ -57,17 +57,28 @@ const ANIM_DURATION       = 250;
 
 export type SidebarScreen =
   | 'dashboard' | 'operations' | 'inventory' | 'stores'
-  | 'sales' | 'salesHistory' | 'users';
+  | 'sales' | 'salesHistory' | 'users' | 'tenantConfig';
 
 interface MenuItem { key: SidebarScreen; label: string; icon: string }
 
+// ROOT — acceso completo + configuración del tenant
+const MENU_ROOT: MenuItem[] = [
+  { key: 'dashboard',    label: 'Dashboard',       icon: 'view-dashboard-outline' },
+  { key: 'salesHistory', label: 'Historial ventas', icon: 'receipt-text-outline' },
+  { key: 'inventory',    label: 'Inventario',       icon: 'package-variant' },
+  { key: 'users',        label: 'Usuarios',         icon: 'account-multiple-outline' },
+  { key: 'operations',   label: 'Operaciones',      icon: 'clipboard-text-outline' },
+  { key: 'stores',       label: 'Locales',          icon: 'store-outline' },
+  { key: 'tenantConfig', label: 'Configuración',    icon: 'tune-variant' },
+];
+
+// ADMIN — gestión operativa sin configuración de locales ni tenant
 const MENU_ADMIN: MenuItem[] = [
-  { key: 'dashboard',    label: 'Dashboard',        icon: 'view-dashboard-outline' },
-  { key: 'salesHistory', label: 'Historial ventas',  icon: 'receipt-text-outline' },
-  { key: 'inventory',    label: 'Inventario',        icon: 'package-variant' },
-  { key: 'users',        label: 'Usuarios',          icon: 'account-multiple-outline' },
-  { key: 'operations',   label: 'Operaciones',       icon: 'cog-outline' },
-  { key: 'stores',       label: 'Locales',           icon: 'store-outline' },
+  { key: 'dashboard',    label: 'Dashboard',       icon: 'view-dashboard-outline' },
+  { key: 'salesHistory', label: 'Historial ventas', icon: 'receipt-text-outline' },
+  { key: 'inventory',    label: 'Inventario',       icon: 'package-variant' },
+  { key: 'users',        label: 'Usuarios',         icon: 'account-multiple-outline' },
+  { key: 'operations',   label: 'Operaciones',      icon: 'clipboard-text-outline' },
 ];
 
 const MENU_USER: MenuItem[] = [
@@ -81,10 +92,11 @@ const SidebarDesktop = ({ active, onSelect }: {
   active: SidebarScreen;
   onSelect: (s: SidebarScreen) => void;
 }) => {
-  const { logout, roles } = useAuth();
+  const { logout, roles, userName } = useAuth();
   const { sidebarCollapsed, toggleSidebar } = useUIPreferences();
+  const isRoot  = roles.includes('root');
   const isAdmin = roles.includes('admin');
-  const menu = isAdmin ? MENU_ADMIN : MENU_USER;
+  const menu = isRoot ? MENU_ROOT : isAdmin ? MENU_ADMIN : MENU_USER;
 
   // Animación de ancho
   const animW = useRef(new Animated.Value(
@@ -118,13 +130,13 @@ const SidebarDesktop = ({ active, onSelect }: {
       {/* ── Header ── */}
       <View style={styles.header}>
         <Image
-          source={require('../assets/images/logo_proyecto_Humberto.jpg')}
+          source={require('../assets/images/icon.png')}
           style={styles.logo}
         />
         {!sidebarCollapsed && (
           <View style={styles.brandText}>
-            <Text style={styles.brandName} numberOfLines={1}>Pollos Hermanos</Text>
-            <Text style={styles.brandSub}>Sistema de gestión</Text>
+            <Text style={styles.brandName} numberOfLines={1}>Klaro</Text>
+            <Text style={styles.brandSub}>{userName ?? 'Sistema de gestión'}</Text>
           </View>
         )}
         <TouchableOpacity style={styles.togglePin} onPress={toggleSidebar} activeOpacity={0.8}>
@@ -201,9 +213,10 @@ const SidebarMobile = ({ active, onSelect, visible, onClose }: {
   visible: boolean;
   onClose: () => void;
 }) => {
-  const { logout, roles } = useAuth();
+  const { logout, roles, userName } = useAuth();
+  const isRoot  = roles.includes('root');
   const isAdmin = roles.includes('admin');
-  const menu = isAdmin ? MENU_ADMIN : MENU_USER;
+  const menu = isRoot ? MENU_ROOT : isAdmin ? MENU_ADMIN : MENU_USER;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -212,12 +225,12 @@ const SidebarMobile = ({ active, onSelect, visible, onClose }: {
 
           <View style={styles.header}>
             <Image
-              source={require('../assets/images/logo_proyecto_Humberto.jpg')}
+              source={require('../assets/images/icon.png')}
               style={styles.logo}
             />
             <View style={styles.brandText}>
-              <Text style={styles.brandName}>Pollos Hermanos</Text>
-              <Text style={styles.brandSub}>Sistema de gestión</Text>
+              <Text style={styles.brandName}>Klaro</Text>
+              <Text style={styles.brandSub}>{userName ?? 'Sistema de gestión'}</Text>
             </View>
             <IconButton icon="close" size={20} iconColor={COLOR.ink2} onPress={onClose} style={{ margin: 0 }} />
           </View>

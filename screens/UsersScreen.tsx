@@ -4,8 +4,10 @@ import {
   ActivityIndicator, Modal, useWindowDimensions,
 } from 'react-native';
 import { Button, TextInput, Snackbar, IconButton } from 'react-native-paper';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
+import { useAuth } from '../context/AuthContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, BREAKPOINT } from '../theme';
 
@@ -28,12 +30,13 @@ interface UserForm {
   username: string;
   password: string;
   storeId: string;
+  role: 'user' | 'admin';
 }
 
-const EMPTY_FORM: UserForm = { fullName: '', username: '', password: '', storeId: '' };
+const EMPTY_FORM: UserForm = { fullName: '', username: '', password: '', storeId: '', role: 'user' };
 
 const statusLabel = (s: string) => s === 'ACTIVE' ? 'Activo' : 'Suspendido';
-const statusColor = (s: string) => s === 'ACTIVE' ? '#168542' : '#d32121';
+const statusColor = (s: string) => s === 'ACTIVE' ? COLOR.income : COLOR.expense;
 
 // ─── UsersScreen ──────────────────────────────────────────────────────────────
 
@@ -41,6 +44,8 @@ export default function UsersScreen() {
   const API = REACT_APP_API_URL;
   const { width } = useWindowDimensions();
   const isDesktop = width >= BREAKPOINT.desktop;
+  const { roles } = useAuth();
+  const isRoot = roles.includes('root');
 
   const [users, setUsers]           = useState<AppUser[]>([]);
   const [stores, setStores]         = useState<Store[]>([]);
@@ -100,6 +105,7 @@ export default function UsersScreen() {
         username: form.username.trim().toLowerCase(),
         password: form.password,
         storeId:  Number(form.storeId),
+        role:     form.role,
       });
       setSnackbar('Usuario creado correctamente');
       setCreateModal(false);
@@ -195,7 +201,10 @@ export default function UsersScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>👥 Usuarios</Text>
+        <View style={styles.headerTitleRow}>
+          <MaterialCommunityIcons name="account-multiple-outline" size={22} color={COLOR.ink} />
+          <Text style={styles.headerTitle}>Usuarios</Text>
+        </View>
         <Button mode="contained" onPress={() => setCreateModal(true)} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ borderRadius: 10 }}>
           + Nuevo usuario
         </Button>
@@ -206,7 +215,7 @@ export default function UsersScreen() {
         <ActivityIndicator size="large" color={COLOR.brand} style={{ marginTop: 40 }} />
       ) : users.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>👤</Text>
+          <MaterialCommunityIcons name="account-outline" size={48} color={COLOR.inkDisabled} />
           <Text style={styles.emptyText}>No hay usuarios creados aún.</Text>
           <Text style={styles.emptySub}>Creá el primer usuario con el botón de arriba.</Text>
         </View>
@@ -294,7 +303,27 @@ export default function UsersScreen() {
                 ))}
               </View>
 
-              <Text style={styles.roleNote}>El usuario recibirá el rol <Text style={{ fontWeight: '900' }}>user</Text> automáticamente.</Text>
+              {/* Selector de rol — solo root puede asignar admin */}
+              {isRoot ? (
+                <View style={{ marginBottom: SPACE.s2 }}>
+                  <Text style={styles.fieldLabel}>Rol *</Text>
+                  <View style={styles.storeSelector}>
+                    {(['user', 'admin'] as const).map(r => (
+                      <TouchableOpacity
+                        key={r}
+                        style={[styles.storeChip, form.role === r && styles.storeChipActive]}
+                        onPress={() => setForm({ ...form, role: r })}
+                      >
+                        <Text style={[styles.storeChipText, form.role === r && styles.storeChipTextActive]}>
+                          {r === 'user' ? 'Cajero (user)' : 'Gerente (admin)'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              ) : (
+                <Text style={styles.roleNote}>El usuario recibirá el rol <Text style={{ fontWeight: '900' }}>user</Text> automáticamente.</Text>
+              )}
 
               <View style={styles.modalActions}>
                 <Button mode="outlined" onPress={() => { setCreateModal(false); setForm(EMPTY_FORM); }} style={{ flex: 1 }}>Cancelar</Button>
@@ -373,10 +402,10 @@ const styles = StyleSheet.create({
   root:           { flex: 1, backgroundColor: COLOR.bg },
 
   header:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: SPACE.s2, padding: SPACE.s4, backgroundColor: COLOR.surface, borderBottomWidth: 1, borderBottomColor: COLOR.border },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s2 },
   headerTitle:    { fontSize: FONT_SIZE.h1, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
 
   empty:          { flex: 1, justifyContent: 'center', alignItems: 'center', gap: SPACE.s2, padding: SPACE.s8 },
-  emptyIcon:      { fontSize: 40 },
   emptyText:      { fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
   emptySub:       { fontSize: FONT_SIZE.label, color: COLOR.inkMute },
 

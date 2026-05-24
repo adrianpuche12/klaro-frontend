@@ -1,6 +1,8 @@
 import { Slot, useSegments, useRootNavigationState, router } from 'expo-router';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from '../context/AuthContext';
+import { StoreProvider } from '../context/StoreContext';
+import { UIPreferencesProvider } from '../context/UIPreferencesContext';
 
 type ValidSegment = 'login' | 'admin' | 'index' | '(tabs)' | '+not-found';
 
@@ -16,23 +18,16 @@ function RootLayoutNav() {
 
     const handleNavigation = () => {
       if (!isAuthenticated) {
-        // Si no está autenticado, redirige al login
-        if (currentSegment !== 'login') {
-          router.replace('/login');
-        }
+        if (currentSegment !== 'login') router.replace('/login');
       } else {
-        const isAdmin = roles.includes('admin');
-        if (isAdmin) {
-          // El admin tiene acceso a todo el sistema, no se fuerza ninguna redirección
-          if (currentSegment === 'login') {
-            router.replace('/admin'); // Redirige al admin a su dashboard
-          }
+        const isPrivileged = roles.includes('root') || roles.includes('admin');
+        if (isPrivileged) {
+          // Root y admin van al dashboard de administración
+          if (currentSegment === 'login') router.replace('/admin');
         } else {
-          // Usuarios normales solo pueden acceder a '/' o rutas específicas
-          const allowedSegments = ['index', '(tabs)']; // Rutas permitidas para usuarios normales
-          if (!allowedSegments.includes(currentSegment)) {
-            router.replace('/'); // Redirige a la ruta raíz
-          }
+          // User solo puede acceder a las rutas de usuario
+          const allowedSegments = ['index', '(tabs)'];
+          if (!allowedSegments.includes(currentSegment)) router.replace('/');
         }
       }
     };
@@ -46,7 +41,11 @@ function RootLayoutNav() {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <RootLayoutNav />
+      <UIPreferencesProvider>
+        <StoreProvider>
+          <RootLayoutNav />
+        </StoreProvider>
+      </UIPreferencesProvider>
     </AuthProvider>
   );
 }
