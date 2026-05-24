@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 import { API_KEYCLOAK_ADAPTER_URL } from '../config';
-import { ActivityIndicator, Platform, View } from 'react-native';
+import { Platform } from 'react-native';
 
 
 interface AuthState {
@@ -108,7 +108,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     roles: [],
     userName: null,
     userId: null,
-    loading: true,
+    loading: false,
     error: null,
   });
 
@@ -337,11 +337,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     };
 
-    const timeout = setTimeout(() => {
-      setAuthState(prev => prev.loading ? { ...prev, loading: false } : prev);
-    }, 5000);
-
-    initializeAuth().finally(() => clearTimeout(timeout));
+    initializeAuth();
   }, []);
 
   useEffect(() => {
@@ -372,14 +368,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       axios.interceptors.response.eject(interceptor);
     };
   }, [authState.refreshToken]);
-
-  if (authState.loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
 
   return (
     <AuthContext.Provider
