@@ -10,7 +10,13 @@ Sentry.init({
   enabled: !!process.env.EXPO_PUBLIC_SENTRY_DSN,
   environment: process.env.EXPO_PUBLIC_SENTRY_ENV ?? 'development',
   tracesSampleRate: 1.0,
+  integrations: [Sentry.browserTracingIntegration()],
 });
+
+// Test de conexión — captura una excepción al cargar la app
+if (process.env.EXPO_PUBLIC_SENTRY_DSN) {
+  Sentry.captureException(new Error('Sentry connection test — Belopia frontend'));
+}
 
 type ValidSegment = 'login' | 'admin' | 'index' | '(tabs)' | '+not-found';
 
