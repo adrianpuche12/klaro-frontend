@@ -42,3 +42,5 @@ app-example
 
 # Notas locales
 archivos_importantes.txt
+playwright-report/
+test-results/
