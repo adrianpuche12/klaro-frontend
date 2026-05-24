@@ -109,7 +109,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     roles: [],
     userName: null,
     userId: null,
-    loading: true,
+    loading: false,
     error: null,
   });
 
@@ -175,7 +175,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         new URLSearchParams({
           grant_type: 'refresh_token',
           refresh_token: refreshToken,
-          client_id: 'klaro-backend',
+          client_id: 'klaro-frontend',
         }),
         { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
       );
@@ -234,7 +234,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           grant_type: 'password',
           username,
           password,
-          client_id: 'klaro-backend',
+          client_id: 'klaro-frontend',
         }),
         { 
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, 
@@ -406,10 +406,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       axios.interceptors.response.eject(interceptor);
     };
   }, []); // deps vacías — se monta una sola vez, lee el token desde refreshTokenRef
-
-  if (authState.loading) {
-    return <SplashScreen />;
-  }
 
   return (
     <AuthContext.Provider
