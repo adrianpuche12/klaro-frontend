@@ -32,7 +32,7 @@ const UserSidebar = ({ active, onSelect, onClose, isDesktop }: {
     <View style={styles.sidebar}>
       <View style={styles.sidebarHeader}>
         <View>
-          <Text style={styles.brandText}>Klaro</Text>
+          <Text style={styles.brandText}>Belopia</Text>
           <Text style={styles.brandSub}>{userName}</Text>
         </View>
         {!isDesktop && (
