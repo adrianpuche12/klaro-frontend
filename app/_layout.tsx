@@ -1,8 +1,15 @@
 import { Slot, useSegments, useRootNavigationState, router } from 'expo-router';
 import { useEffect } from 'react';
+import * as Sentry from '@sentry/react-native';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { StoreProvider } from '../context/StoreContext';
 import { UIPreferencesProvider } from '../context/UIPreferencesContext';
+
+Sentry.init({
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
+  enabled: !!process.env.EXPO_PUBLIC_SENTRY_DSN,
+  environment: process.env.EXPO_PUBLIC_SENTRY_ENV ?? 'development',
+});
 
 type ValidSegment = 'login' | 'admin' | 'index' | '(tabs)' | '+not-found';
 
