@@ -154,7 +154,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { access_token, refresh_token, expires_in } = response.data;
       const decodedToken = jwtDecode<any>(access_token);
       const userRoles = decodedToken.realm_access?.roles || [];
-      const isAdmin = userRoles.includes('admin');
+      const isAdmin = userRoles.includes('admin') || userRoles.includes('root');
       const userName = decodedToken.preferred_username;
       const userId = decodedToken.sub;
 
@@ -212,7 +212,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('Roles from token:', decodedToken.realm_access?.roles);
 
       const userRoles = decodedToken.realm_access?.roles || [];
-      const isAdmin = userRoles.includes('admin');
+      const isAdmin = userRoles.includes('admin') || userRoles.includes('root');
       const userName = decodedToken.preferred_username;
       const userId = decodedToken.sub;
 
