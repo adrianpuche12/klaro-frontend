@@ -4,7 +4,7 @@ import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 import { API_KEYCLOAK_ADAPTER_URL } from '../config';
 import { Platform } from 'react-native';
-import { SplashScreen } from '../components/SplashScreen';
+import SplashScreen from '../components/SplashScreen';
 
 
 interface AuthState {
