@@ -1,426 +1,151 @@
-import React, { useEffect, useRef, useState } from 'react';
+// =============================================================================
+// Sidebar.tsx  ·  components/Sidebar.tsx
+// Drawer de navegación. Mobile: overlay animado. Desktop (>=900): fijo a la izq.
+// Sin emojis, sin inline styles, sin hex. Conservá tu navegación real (onNavigate)
+// y el rol del usuario (de useAuth) — solo cambia la presentación.
+// =============================================================================
+import React, { useEffect, useRef } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Image, Modal, useWindowDimensions, Animated, Platform, Pressable,
+  View, Text, StyleSheet, TouchableOpacity, Animated, useWindowDimensions, ScrollView,
 } from 'react-native';
-import { IconButton } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useAuth } from '../context/AuthContext';
-import { useUIPreferences } from '../context/UIPreferencesContext';
-import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, BREAKPOINT } from '../theme';
+import { COLOR, SPACE, FONT_SIZE, FONT_WEIGHT, RADIUS, SHADOW } from '../theme';
 
-// Tooltip custom liviano — no requiere Paper Provider
-const SidebarTooltip = ({ label, children }: { label: string; children: React.ReactNode }) => {
-  const [visible, setVisible] = useState(false);
-  return (
-    <View style={{ position: 'relative' }}>
-      <Pressable
-        onHoverIn={() => setVisible(true)}
-        onHoverOut={() => setVisible(false)}
-        onPress={() => setVisible(false)}
-      >
-        {children}
-      </Pressable>
-      {visible && (
-        <View style={tooltipStyles.box} pointerEvents="none">
-          <Text style={tooltipStyles.text}>{label}</Text>
-        </View>
-      )}
-    </View>
-  );
-};
+type Role = 'root' | 'admin' | 'user';
+type Key = 'dashboard' | 'ventas' | 'inventario' | 'historial' | 'operaciones' | 'usuarios' | 'locales' | 'configuracion';
 
-const tooltipStyles = StyleSheet.create({
-  box: {
-    position: 'absolute',
-    left: 64,
-    top: '50%' as any,
-    transform: [{ translateY: -12 }],
-    backgroundColor: COLOR.ink,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: RADIUS.r1,
-    zIndex: 999,
-    minWidth: 80,
-  },
-  text: {
-    color: COLOR.white,
-    fontSize: FONT_SIZE.label,
-    fontWeight: FONT_WEIGHT.medium as any,
-    ...(Platform.OS === 'web' ? { whiteSpace: 'nowrap' as any } : {}),
-  },
-});
-
-const SIDEBAR_W_EXPANDED  = 260;
-const SIDEBAR_W_COLLAPSED = 88;
-const ANIM_DURATION       = 250;
-
-export type SidebarScreen =
-  | 'dashboard' | 'operations' | 'inventory' | 'stores'
-  | 'sales' | 'salesHistory' | 'users' | 'tenantConfig';
-
-interface MenuItem { key: SidebarScreen; label: string; icon: string }
-
-// ROOT — acceso completo + configuración del tenant
-const MENU_ROOT: MenuItem[] = [
-  { key: 'dashboard',    label: 'Dashboard',       icon: 'view-dashboard-outline' },
-  { key: 'salesHistory', label: 'Historial ventas', icon: 'receipt-text-outline' },
-  { key: 'inventory',    label: 'Inventario',       icon: 'package-variant' },
-  { key: 'users',        label: 'Usuarios',         icon: 'account-multiple-outline' },
-  { key: 'operations',   label: 'Operaciones',      icon: 'clipboard-text-outline' },
-  { key: 'stores',       label: 'Locales',          icon: 'store-outline' },
-  { key: 'tenantConfig', label: 'Configuración',    icon: 'tune-variant' },
+const ITEMS: { key: Key; icon: string; label: string }[] = [
+  { key: 'dashboard',    icon: 'view-dashboard-outline',            label: 'Dashboard' },
+  { key: 'ventas',       icon: 'point-of-sale',                     label: 'Ventas' },
+  { key: 'inventario',   icon: 'package-variant-closed',            label: 'Inventario' },
+  { key: 'historial',    icon: 'history',                           label: 'Historial' },
+  { key: 'operaciones',  icon: 'file-document-multiple-outline',    label: 'Operaciones' },
+  { key: 'usuarios',     icon: 'account-group-outline',             label: 'Usuarios' },
+  { key: 'locales',      icon: 'store-outline',                     label: 'Locales' },
+  { key: 'configuracion',icon: 'cog-outline',                       label: 'Configuración' },
 ];
 
-// ADMIN — gestión operativa sin configuración de locales ni tenant
-const MENU_ADMIN: MenuItem[] = [
-  { key: 'dashboard',    label: 'Dashboard',       icon: 'view-dashboard-outline' },
-  { key: 'salesHistory', label: 'Historial ventas', icon: 'receipt-text-outline' },
-  { key: 'inventory',    label: 'Inventario',       icon: 'package-variant' },
-  { key: 'users',        label: 'Usuarios',         icon: 'account-multiple-outline' },
-  { key: 'operations',   label: 'Operaciones',      icon: 'clipboard-text-outline' },
-];
+const MENU_ROOT: Key[]  = ['dashboard', 'ventas', 'inventario', 'historial', 'operaciones', 'usuarios', 'locales', 'configuracion'];
+const MENU_ADMIN: Key[] = ['dashboard', 'ventas', 'inventario', 'historial', 'operaciones', 'usuarios'];
+const MENU_USER: Key[]  = ['ventas', 'inventario'];
 
-const MENU_USER: MenuItem[] = [
-  { key: 'sales',        label: 'Ventas',     icon: 'cart-outline' },
-  { key: 'inventory',    label: 'Inventario', icon: 'package-variant' },
-];
+function menuFor(role: Role): Key[] {
+  return role === 'root' ? MENU_ROOT : role === 'admin' ? MENU_ADMIN : MENU_USER;
+}
 
-// ─── Sidebar desktop colapsable ───────────────────────────────────────────────
+interface Props {
+  open: boolean;
+  onClose: () => void;
+  role: Role;
+  username: string;
+  active: Key;
+  onNavigate: (key: Key) => void;
+  onLogout: () => void;
+}
 
-const SidebarDesktop = ({ active, onSelect }: {
-  active: SidebarScreen;
-  onSelect: (s: SidebarScreen) => void;
-}) => {
-  const { logout, roles, userName } = useAuth();
-  const { sidebarCollapsed, toggleSidebar } = useUIPreferences();
-  const isRoot  = roles.includes('root');
-  const isAdmin = roles.includes('admin');
-  const menu = isRoot ? MENU_ROOT : isAdmin ? MENU_ADMIN : MENU_USER;
-
-  // Animación de ancho
-  const animW = useRef(new Animated.Value(
-    sidebarCollapsed ? SIDEBAR_W_COLLAPSED : SIDEBAR_W_EXPANDED
-  )).current;
+export default function Sidebar({ open, onClose, role, username, active, onNavigate, onLogout }: Props) {
+  const { width } = useWindowDimensions();
+  const fixed = width >= 900;
+  const drawerW = fixed ? 280 : Math.min(width * 0.85, 300);
+  const tx = useRef(new Animated.Value(fixed ? 0 : -drawerW)).current;
 
   useEffect(() => {
-    Animated.timing(animW, {
-      toValue: sidebarCollapsed ? SIDEBAR_W_COLLAPSED : SIDEBAR_W_EXPANDED,
-      duration: ANIM_DURATION,
-      useNativeDriver: false,
-    }).start();
-  }, [sidebarCollapsed]);
+    if (fixed) return;
+    Animated.timing(tx, { toValue: open ? 0 : -drawerW, duration: 240, useNativeDriver: true }).start();
+  }, [open, fixed, drawerW, tx]);
 
-  // Atajo Ctrl+B / Cmd+B (solo web)
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
-        e.preventDefault();
-        toggleSidebar();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [toggleSidebar]);
+  const keys = menuFor(role);
 
-  return (
-    <Animated.View style={[styles.sidebar, { width: animW }]}>
-
-      {/* ── Header ── */}
-      <View style={styles.header}>
-        <Image
-          source={require('../assets/images/icon.png')}
-          style={styles.logo}
-        />
-        {!sidebarCollapsed && (
-          <View style={styles.brandText}>
-            <Text style={styles.brandName} numberOfLines={1}>Belopia</Text>
-            <Text style={styles.brandSub}>{userName ?? 'Sistema de gestión'}</Text>
-          </View>
-        )}
-        <TouchableOpacity style={styles.togglePin} onPress={toggleSidebar} activeOpacity={0.8}>
-          <MaterialCommunityIcons
-            name={sidebarCollapsed ? 'chevron-right' : 'chevron-left'}
-            size={16}
-            color={COLOR.ink2}
-          />
-        </TouchableOpacity>
+  const Panel = (
+    <View style={[styles.panel, { width: drawerW }, fixed && styles.panelFixed]}>
+      {/* Branding */}
+      <View style={styles.head}>
+        <View style={styles.logo}><MaterialCommunityIcons name="store-outline" size={20} color={COLOR.inkOnBrand} /></View>
+        <Text style={styles.brand}>BELOPIA</Text>
       </View>
 
-      {/* ── Menú ── */}
-      <ScrollView style={styles.menuScroll} showsVerticalScrollIndicator={false}>
-        {menu.map(item => {
-          const isActive = active === item.key;
-          if (sidebarCollapsed) {
-            return (
-              <TouchableOpacity
-                key={item.key}
-                style={[styles.menuItemCollapsed, isActive && styles.menuItemActive]}
-                onPress={() => onSelect(item.key)}
-                activeOpacity={0.7}
-              >
-                <MaterialCommunityIcons
-                  name={item.icon}
-                  size={20}
-                  color={isActive ? COLOR.brandDeep : COLOR.ink2}
-                />
-                {isActive && <View style={styles.activeBar} />}
-              </TouchableOpacity>
-            );
-          }
+      {/* Usuario */}
+      <View style={styles.userBox}>
+        <View style={styles.avatar}><MaterialCommunityIcons name="account" size={22} color={COLOR.brandDeep} /></View>
+        <View style={styles.flex}>
+          <Text style={styles.username}>{username}</Text>
+          <View style={[styles.roleBadge, roleStyle(role).box]}>
+            <Text style={[styles.roleTxt, roleStyle(role).txt]}>{role}</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Menú */}
+      <ScrollView style={styles.menu} contentContainerStyle={styles.menuContent}>
+        <Text style={styles.sectionLbl}>NAVEGACIÓN</Text>
+        {ITEMS.filter(it => keys.includes(it.key)).map(it => {
+          const on = it.key === active;
           return (
-            <TouchableOpacity
-              key={item.key}
-              style={[styles.menuItem, isActive && styles.menuItemActive]}
-              onPress={() => onSelect(item.key)}
-              activeOpacity={0.7}
-            >
-              <MaterialCommunityIcons
-                name={item.icon}
-                size={20}
-                color={isActive ? COLOR.brandDeep : COLOR.ink2}
-              />
-              <Text style={[styles.menuLabel, isActive && styles.menuLabelActive]}>
-                {item.label}
-              </Text>
-              {isActive && <View style={styles.activeBar} />}
+            <TouchableOpacity key={it.key} style={[styles.item, on && styles.itemActive]} onPress={() => onNavigate(it.key)}>
+              <MaterialCommunityIcons name={it.icon} size={20} color={on ? COLOR.brandDeep : COLOR.inkMute} />
+              <Text style={[styles.itemTxt, on && styles.itemTxtActive]}>{it.label}</Text>
             </TouchableOpacity>
           );
         })}
+
+        <View style={styles.sep} />
+
+        <TouchableOpacity style={styles.item} onPress={onLogout}>
+          <MaterialCommunityIcons name="logout" size={20} color={COLOR.expense} />
+          <Text style={[styles.itemTxt, styles.logoutTxt]}>Cerrar sesión</Text>
+        </TouchableOpacity>
       </ScrollView>
-
-      {/* ── Logout ── */}
-      <TouchableOpacity
-        style={[styles.logoutBtn, sidebarCollapsed && styles.logoutBtnCollapsed]}
-        onPress={logout}
-        activeOpacity={0.7}
-      >
-        <MaterialCommunityIcons name="logout" size={18} color={COLOR.expense} />
-        {!sidebarCollapsed && (
-          <Text style={styles.logoutLabel}>Cerrar sesión</Text>
-        )}
-      </TouchableOpacity>
-    </Animated.View>
+    </View>
   );
-};
 
-// ─── Sidebar mobile (drawer modal — igual que antes) ─────────────────────────
+  if (fixed) return Panel;
 
-const SidebarMobile = ({ active, onSelect, visible, onClose }: {
-  active: SidebarScreen;
-  onSelect: (s: SidebarScreen) => void;
-  visible: boolean;
-  onClose: () => void;
-}) => {
-  const { logout, roles, userName } = useAuth();
-  const isRoot  = roles.includes('root');
-  const isAdmin = roles.includes('admin');
-  const menu = isRoot ? MENU_ROOT : isAdmin ? MENU_ADMIN : MENU_USER;
-
+  // Mobile: overlay + drawer animado
+  if (!open) return <Animated.View pointerEvents="none" style={[styles.overlay, { opacity: 0 }]} />;
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <View style={[styles.sidebar, { width: SIDEBAR_W_EXPANDED }]}>
-
-          <View style={styles.header}>
-            <Image
-              source={require('../assets/images/icon.png')}
-              style={styles.logo}
-            />
-            <View style={styles.brandText}>
-              <Text style={styles.brandName}>Belopia</Text>
-              <Text style={styles.brandSub}>{userName ?? 'Sistema de gestión'}</Text>
-            </View>
-            <IconButton icon="close" size={20} iconColor={COLOR.ink2} onPress={onClose} style={{ margin: 0 }} />
-          </View>
-
-          <ScrollView style={styles.menuScroll} showsVerticalScrollIndicator={false}>
-            {menu.map(item => {
-              const isActive = active === item.key;
-              return (
-                <TouchableOpacity
-                  key={item.key}
-                  style={[styles.menuItem, isActive && styles.menuItemActive]}
-                  onPress={() => { onSelect(item.key); onClose(); }}
-                  activeOpacity={0.7}
-                >
-                  <MaterialCommunityIcons
-                    name={item.icon}
-                    size={20}
-                    color={isActive ? COLOR.brandDeep : COLOR.ink2}
-                  />
-                  <Text style={[styles.menuLabel, isActive && styles.menuLabelActive]}>
-                    {item.label}
-                  </Text>
-                  {isActive && <View style={styles.activeBar} />}
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          <TouchableOpacity style={styles.logoutBtn} onPress={logout} activeOpacity={0.7}>
-            <MaterialCommunityIcons name="logout" size={18} color={COLOR.expense} />
-            <Text style={styles.logoutLabel}>Cerrar sesión</Text>
-          </TouchableOpacity>
-        </View>
-        <TouchableOpacity style={styles.overlayBg} onPress={onClose} />
-      </View>
-    </Modal>
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose} />
+      <Animated.View style={[styles.drawerWrap, { transform: [{ translateX: tx }] }]}>
+        {Panel}
+      </Animated.View>
+    </View>
   );
-};
-
-// ─── Sidebar público ──────────────────────────────────────────────────────────
-
-interface Props {
-  active: SidebarScreen;
-  onSelect: (screen: SidebarScreen) => void;
-  visible: boolean;
-  onClose: () => void;
 }
 
-const Sidebar: React.FC<Props> = ({ active, onSelect, visible, onClose }) => {
-  const { width } = useWindowDimensions();
-  const isDesktop = width >= BREAKPOINT.desktop;
-
-  if (isDesktop) {
-    return <SidebarDesktop active={active} onSelect={onSelect} />;
-  }
-
-  return (
-    <SidebarMobile
-      active={active}
-      onSelect={onSelect}
-      visible={visible}
-      onClose={onClose}
-    />
-  );
-};
-
-// ─── Estilos ──────────────────────────────────────────────────────────────────
+function roleStyle(role: Role) {
+  if (role === 'root') return { box: styles.badgeRoot, txt: styles.badgeRootTxt };
+  if (role === 'admin') return { box: styles.badgeAdmin, txt: styles.badgeAdminTxt };
+  return { box: styles.badgeUser, txt: styles.badgeUserTxt };
+}
 
 const styles = StyleSheet.create({
-  overlay:   { flex: 1, flexDirection: 'row' },
-  overlayBg: { flex: 1, backgroundColor: COLOR.overlay },
+  flex: { flex: 1 },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: COLOR.overlay },
+  drawerWrap: { position: 'absolute', top: 0, bottom: 0, left: 0 },
 
-  sidebar: {
-    backgroundColor: COLOR.surface,
-    borderRightWidth: 1,
-    borderRightColor: COLOR.border,
-    flexDirection: 'column',
-    overflow: 'hidden',
-    ...SHADOW.md,
-  },
+  panel: { flex: 1, backgroundColor: COLOR.surface, borderRightWidth: 1, borderRightColor: COLOR.border, ...SHADOW.lg },
+  panelFixed: { ...SHADOW.sm },
 
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: SPACE.s3,
-    backgroundColor: COLOR.brand,
-    borderBottomWidth: 1,
-    borderBottomColor: COLOR.brandDark,
-    gap: SPACE.s2,
-    position: 'relative',
-  },
-  logo: {
-    width: 36,
-    height: 36,
-    borderRadius: RADIUS.full,
-    borderWidth: 2,
-    borderColor: COLOR.brandDeep,
-    flexShrink: 0,
-  },
-  brandText: { flex: 1, overflow: 'hidden' },
-  brandName: {
-    fontSize: FONT_SIZE.label,
-    fontWeight: FONT_WEIGHT.bold as any,
-    color: COLOR.ink,
-  },
-  brandSub: {
-    fontSize: FONT_SIZE.caption,
-    color: COLOR.ink2,
-    marginTop: 1,
-  },
+  head: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s3, paddingHorizontal: SPACE.s5, paddingVertical: SPACE.s6, borderBottomWidth: 1, borderBottomColor: COLOR.border },
+  logo: { width: 40, height: 40, borderRadius: RADIUS.r2, backgroundColor: COLOR.brand, justifyContent: 'center', alignItems: 'center' },
+  brand: { fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold, color: COLOR.ink, letterSpacing: 2 },
 
-  // Pin toggle cuando colapsado
-  togglePin: {
-    position: 'absolute',
-    right: 6,
-    top: '50%' as any,
-    width: 26,
-    height: 26,
-    borderRadius: RADIUS.full,
-    backgroundColor: COLOR.surface,
-    borderWidth: 1,
-    borderColor: COLOR.border2,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 10,
-    ...SHADOW.sm,
-  },
+  userBox: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s3, padding: SPACE.s4, backgroundColor: COLOR.bg, borderBottomWidth: 1, borderBottomColor: COLOR.border },
+  avatar: { width: 40, height: 40, borderRadius: RADIUS.full, backgroundColor: COLOR.brandTint, justifyContent: 'center', alignItems: 'center' },
+  username: { fontSize: FONT_SIZE.body, fontWeight: FONT_WEIGHT.semibold, color: COLOR.ink },
+  roleBadge: { alignSelf: 'flex-start', marginTop: 3, paddingHorizontal: SPACE.s2, paddingVertical: 1, borderRadius: RADIUS.full, borderWidth: 1 },
+  roleTxt: { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.medium },
+  badgeRoot: { backgroundColor: COLOR.expenseTint, borderColor: COLOR.expense }, badgeRootTxt: { color: COLOR.expense },
+  badgeAdmin: { backgroundColor: COLOR.infoTint, borderColor: COLOR.info }, badgeAdminTxt: { color: COLOR.info },
+  badgeUser: { backgroundColor: COLOR.brandTint, borderColor: COLOR.brand }, badgeUserTxt: { color: COLOR.brandDeep },
 
-  // Menú
-  menuScroll: { flex: 1, paddingTop: SPACE.s2 },
-
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: SPACE.s4,
-    paddingVertical: SPACE.s3,
-    marginHorizontal: SPACE.s2,
-    borderRadius: RADIUS.r2,
-    marginBottom: 2,
-    gap: SPACE.s3,
-    position: 'relative',
-  },
-  menuItemCollapsed: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACE.s3,
-    marginHorizontal: SPACE.s2,
-    borderRadius: RADIUS.r2,
-    marginBottom: 2,
-    position: 'relative',
-  },
-  menuItemActive:  { backgroundColor: COLOR.brandTint },
-  menuLabel: {
-    fontSize: FONT_SIZE.body,
-    fontWeight: FONT_WEIGHT.medium as any,
-    color: COLOR.ink2,
-    flex: 1,
-  },
-  menuLabelActive: {
-    color: COLOR.ink,
-    fontWeight: FONT_WEIGHT.semibold as any,
-  },
-  activeBar: {
-    position: 'absolute',
-    left: 0,
-    top: 8,
-    bottom: 8,
-    width: 3,
-    backgroundColor: COLOR.brand,
-    borderRadius: RADIUS.full,
-  },
-
-  // Logout
-  logoutBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACE.s2,
-    padding: SPACE.s4,
-    borderTopWidth: 1,
-    borderTopColor: COLOR.border,
-  },
-  logoutBtnCollapsed: {
-    justifyContent: 'center',
-    paddingHorizontal: SPACE.s2,
-  },
-  logoutLabel: {
-    fontSize: FONT_SIZE.label,
-    fontWeight: FONT_WEIGHT.semibold as any,
-    color: COLOR.expense,
-  },
+  menu: { flex: 1 },
+  menuContent: { paddingHorizontal: SPACE.s3, paddingTop: SPACE.s4 },
+  sectionLbl: { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.semibold, color: COLOR.inkMute, letterSpacing: 1.5, paddingHorizontal: SPACE.s2, marginBottom: SPACE.s2 },
+  item: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s3, height: 48, borderRadius: RADIUS.r2, paddingHorizontal: SPACE.s3 },
+  itemActive: { backgroundColor: COLOR.brandTint, borderLeftWidth: 3, borderLeftColor: COLOR.brand, paddingLeft: SPACE.s3 - 3 },
+  itemTxt: { fontSize: FONT_SIZE.body, color: COLOR.ink2 },
+  itemTxtActive: { color: COLOR.brandDeep, fontWeight: FONT_WEIGHT.semibold },
+  sep: { height: 1, backgroundColor: COLOR.border, marginVertical: SPACE.s3, marginHorizontal: SPACE.s2 },
+  logoutTxt: { color: COLOR.expense },
 });
-
-export default Sidebar;
