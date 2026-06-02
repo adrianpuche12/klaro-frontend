@@ -133,7 +133,7 @@ const UserContent = () => {
           </View>
         )}
 
-        {active === 'sales'        && <POSScreen hideStoreSelector />}
+        {active === 'sales'        && <POSScreen />}
         {active === 'inventory'    && <InventoryScreen />}
         {active === 'salesHistory' && <SalesHistoryScreen />}
         {active === 'operaciones'  && <DynamicFormScreen />}
