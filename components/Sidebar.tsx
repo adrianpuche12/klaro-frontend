@@ -51,7 +51,7 @@ export default function Sidebar({ open, onClose, role, username, active, onNavig
 
   useEffect(() => {
     if (fixed) return;
-    Animated.timing(tx, { toValue: open ? 0 : -drawerW, duration: 240, useNativeDriver: true }).start();
+    Animated.timing(tx, { toValue: open ? 0 : -drawerW, duration: 240, useNativeDriver: false }).start();
   }, [open, fixed, drawerW, tx]);
 
   const keys = menuFor(role);
