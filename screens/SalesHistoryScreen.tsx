@@ -1,375 +1,305 @@
-// =============================================================================
-// SalesHistoryScreen.tsx  ·  screens/SalesHistoryScreen.tsx
-// Historial de ventas con filtros de período, resumen, filas expandibles.
-// Sin emojis, sin inline styles, sin hex. FlatList con keyExtractor.
-// Reemplazá los tipos/datos genéricos por tu modelo real SIN cambiar la lógica.
-// =============================================================================
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, ScrollView,
-  TouchableOpacity, LayoutAnimation, Platform, UIManager, ActivityIndicator,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  ActivityIndicator, useWindowDimensions, RefreshControl,
 } from 'react-native';
-import axios from 'axios';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import { COLOR, SPACE, FONT_SIZE, FONT_WEIGHT, RADIUS, CONTROL, SHADOW } from '../theme';
-import { useStore } from '../context/StoreContext';
-import { useAuth } from '../context/AuthContext';
+import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../theme';
+import { formatHnl, formatDate, formatTime } from '../utils/format';
+import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
+import { useStore } from '../context/StoreContext';
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
+// ─── Tipos ────────────────────────────────────────────────────────────────────
+
+interface ShiftRecord {
+  id: number;
+  code: string;
+  username: string;
+  status: string;
+  storeId: number;
+  storeName: string;
+  openedAt: string;
+  closedAt: string | null;
 }
 
-type Period = 'turno' | 'hoy' | 'semana' | 'mes';
-type Metodo = 'efectivo' | 'tarjeta';
-type Estado = 'activa' | 'cancelada';
-
-interface SaleItem { nombre: string; cantidad: number; precioUnit: number; }
-interface Sale {
-  id: string;            // V-20260602-0047
-  hora: string;          // "14:30"
-  metodo: Metodo;
-  estado: Estado;
-  usuario: string;
-  local: string;
-  total: number;
+interface ProductSummaryItem {
+  productId: number;
+  productName: string;
+  quantity: number;
   subtotal: number;
-  impuesto: number;
-  items: SaleItem[];
-  resumenProductos: string; // "Pollo entero ×2, Refresco ×2"
 }
 
-interface Summary { total: number; cantidad: number; efectivo: number; tarjeta: number; }
-
-const PERIODS: { key: Period; label: string }[] = [
-  { key: 'turno', label: 'Turno actual' },
-  { key: 'hoy', label: 'Hoy' },
-  { key: 'semana', label: 'Esta semana' },
-  { key: 'mes', label: 'Este mes' },
-];
-
-const L = (n: number) => `L ${n.toLocaleString('es-HN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-interface Props {
-  sales: Sale[];
-  summary: Summary;
-  isAdmin: boolean;
-  onBack: () => void;
-  onLoadMore?: () => void;
-  onCancelSale?: (saleId: string) => void;
-  hasMore?: boolean;
+interface ShiftSummary {
+  date: string;
+  storeId: number;
+  storeName: string;
+  totalSales: number;
+  totalSubtotal: number;
+  totalIsv: number;
+  totalAmount: number;
+  productSummary: ProductSummaryItem[];
 }
 
-function SalesHistoryView({
-  sales, summary, isAdmin, onBack, onLoadMore, onCancelSale, hasMore,
-}: Props) {
-  const [period, setPeriod] = useState<Period>('turno');
-  const [openId, setOpenId] = useState<string | null>(sales[0]?.id ?? null);
 
-  const toggle = (id: string) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setOpenId(prev => (prev === id ? null : id));
+// ─── SalesHistoryScreen ───────────────────────────────────────────────────────
+
+export default function SalesHistoryScreen() {
+  const API = REACT_APP_API_URL;
+  const { stores, selectedStore, setSelectedStore } = useStore();
+
+  const [shifts, setShifts]           = useState<ShiftRecord[]>([]);
+  const PAGE_SIZE = 20;
+
+  const [loading, setLoading]         = useState(false);
+  const [refreshing, setRefreshing]   = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore]         = useState(true);
+  const [page, setPage]               = useState(0);
+  const [expanded, setExpanded]       = useState<Record<number, boolean>>({});
+  const [summaries, setSummaries]     = useState<Record<number, ShiftSummary>>({});
+  const [loadingSum, setLoadingSum]   = useState<Record<number, boolean>>({});
+  const [error, setError]             = useState('');
+
+  // ── Cargar turnos del local (primera página) ─────────────────────────────
+
+  const loadShifts = useCallback(async () => {
+    if (!selectedStore) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await axios.get<ShiftRecord[]>(
+        `${API}/api/v2/stores/${selectedStore.id}/shifts?page=0&size=${PAGE_SIZE}`
+      );
+      setShifts(res.data);
+      setPage(0);
+      setHasMore(res.data.length === PAGE_SIZE);
+      setExpanded({});
+      setSummaries({});
+    } catch {
+      setError('No se pudo cargar el historial de turnos.');
+    } finally { setLoading(false); }
+  }, [selectedStore]);
+
+  // ── Cargar más turnos ─────────────────────────────────────────────────────
+
+  const loadMore = async () => {
+    if (!selectedStore || loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const nextPage = page + 1;
+      const res = await axios.get<ShiftRecord[]>(
+        `${API}/api/v2/stores/${selectedStore.id}/shifts?page=${nextPage}&size=${PAGE_SIZE}`
+      );
+      setShifts(prev => [...prev, ...res.data]);
+      setPage(nextPage);
+      setHasMore(res.data.length === PAGE_SIZE);
+    } catch { /* silencioso */ }
+    finally { setLoadingMore(false); }
   };
 
-  const header = useMemo(() => (
-    <>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-        {PERIODS.map(p => (
-          <TouchableOpacity
-            key={p.key}
-            style={[styles.chip, period === p.key && styles.chipOn]}
-            onPress={() => setPeriod(p.key)}
-          >
-            <Text style={[styles.chipTxt, period === p.key && styles.chipTxtOn]}>{p.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+  useEffect(() => { loadShifts(); }, [loadShifts]);
 
-      <View style={styles.summary}>
-        <Text style={styles.sumLbl}>RESUMEN DEL PERÍODO</Text>
-        <Text style={styles.sumAmt}>{L(summary.total)}</Text>
-        <Text style={styles.sumSub}>en {summary.cantidad} ventas</Text>
-        <View style={styles.split}>
-          <View style={styles.splitItem}>
-            <MaterialCommunityIcons name="cash" size={14} color={COLOR.inkMute} />
-            <Text style={styles.splitTxt}>Efectivo {L(summary.efectivo)}</Text>
-          </View>
-          <View style={styles.splitItem}>
-            <MaterialCommunityIcons name="credit-card-outline" size={14} color={COLOR.inkMute} />
-            <Text style={styles.splitTxt}>Tarjeta {L(summary.tarjeta)}</Text>
-          </View>
-        </View>
-      </View>
-    </>
-  ), [period, summary]);
+  const onRefresh = async () => { setRefreshing(true); await loadShifts(); setRefreshing(false); };
 
-  const renderItem = ({ item }: { item: Sale }) => {
-    const open = openId === item.id;
-    const cancelada = item.estado === 'cancelada';
-    return (
-      <View style={styles.sale}>
-        <TouchableOpacity activeOpacity={0.7} style={styles.saleHead} onPress={() => toggle(item.id)}>
-          <View style={styles.l1}>
-            <Text style={styles.time}>{item.hora}</Text>
-            <View style={styles.pillPay}>
-              <MaterialCommunityIcons name={item.metodo === 'efectivo' ? 'cash' : 'credit-card-outline'} size={13} color={COLOR.info} />
-              <Text style={styles.pillPayTxt}>{item.metodo === 'efectivo' ? 'EFECTIVO' : 'TARJETA'}</Text>
-            </View>
-            <View style={[styles.pillState, cancelada ? styles.pillCancel : styles.pillActive]}>
-              <Text style={cancelada ? styles.pillCancelTxt : styles.pillActiveTxt}>
-                {cancelada ? 'CANCELADA' : 'ACTIVA'}
-              </Text>
-            </View>
-          </View>
+  // ── Expandir turno y cargar resumen ──────────────────────────────────────
 
-          <View style={styles.l2}>
-            <View style={styles.who}>
-              <MaterialCommunityIcons name="account-outline" size={12} color={COLOR.inkMute} />
-              <Text style={styles.whoTxt}>{item.usuario}</Text>
-            </View>
-            <View style={styles.who}>
-              <MaterialCommunityIcons name="store-outline" size={12} color={COLOR.inkMute} />
-              <Text style={styles.whoTxt}>{item.local}</Text>
-            </View>
-            <Text style={[styles.amt, cancelada && styles.amtCancel]}>{L(item.total)}</Text>
-          </View>
+  const toggleShift = async (shift: ShiftRecord) => {
+    const isOpen = expanded[shift.id];
+    setExpanded(prev => ({ ...prev, [shift.id]: !isOpen }));
 
-          <Text style={styles.prods} numberOfLines={1}>{item.resumenProductos}</Text>
-        </TouchableOpacity>
-
-        {open && (
-          <View style={styles.detail}>
-            <Text style={styles.detailId}>DETALLE DE VENTA #{item.id}</Text>
-            {item.items.map((it, i) => (
-              <View key={i} style={styles.ditem}>
-                <Text style={styles.dName}>{it.nombre}</Text>
-                <Text style={styles.dQty}>×{it.cantidad} · {L(it.precioUnit)}</Text>
-                <Text style={styles.dSt}>{L(it.cantidad * it.precioUnit)}</Text>
-              </View>
-            ))}
-            <View style={styles.dsep} />
-            <View style={styles.dtot}><Text style={styles.dtotL}>Subtotal</Text><Text style={styles.dtotV}>{L(item.subtotal)}</Text></View>
-            <View style={styles.dtot}><Text style={styles.dtotL}>ISV 15%</Text><Text style={styles.dtotV}>{L(item.impuesto)}</Text></View>
-            <View style={styles.dtot}><Text style={styles.grandL}>Total</Text><Text style={styles.grandV}>{L(item.total)}</Text></View>
-            {isAdmin && !cancelada && (
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => onCancelSale?.(item.id)}>
-                <Text style={styles.cancelTxt}>Cancelar venta</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-      </View>
-    );
+    if (!isOpen && !summaries[shift.id]) {
+      setLoadingSum(prev => ({ ...prev, [shift.id]: true }));
+      try {
+        const res = await axios.get<ShiftSummary>(
+          `${API}/api/v2/shifts/${shift.id}/summary`
+        );
+        setSummaries(prev => ({ ...prev, [shift.id]: res.data }));
+      } catch { /* resumen no disponible */ }
+      finally { setLoadingSum(prev => ({ ...prev, [shift.id]: false })); }
+    }
   };
+
+  // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <View style={styles.container}>
-      <View style={styles.appbar}>
-        <TouchableOpacity style={styles.back} onPress={onBack}>
-          <MaterialCommunityIcons name="chevron-left" size={24} color={COLOR.ink} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Historial de ventas</Text>
+    <View style={styles.root}>
+
+      {/* ── Header ── */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Historial de ventas</Text>
+        {/* Selector de local */}
+        <View style={styles.storeChips}>
+          {stores.map(s => (
+            <TouchableOpacity
+              key={s.id}
+              style={[styles.chip, selectedStore?.id === s.id && styles.chipActive]}
+              onPress={() => setSelectedStore(s)}
+            >
+              <Text style={[styles.chipText, selectedStore?.id === s.id && styles.chipTextActive]}>
+                {s.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
-      <FlatList
-        data={sales}
-        renderItem={renderItem}
-        keyExtractor={item => item.id}
-        ListHeaderComponent={header}
-        ListFooterComponent={
-          hasMore ? (
-            <TouchableOpacity style={styles.loadMore} onPress={onLoadMore}>
-              <Text style={styles.loadMoreTxt}>Cargar más</Text>
+      {/* ── Contenido ── */}
+      {loading ? (
+        <ActivityIndicator size="large" color={COLOR.brand} style={{ marginTop: 40 }} />
+      ) : error ? (
+        <Text style={styles.error}>{error}</Text>
+      ) : shifts.length === 0 ? (
+        <View style={styles.empty}>
+          <MaterialCommunityIcons name="receipt-text-outline" size={40} color={COLOR.inkDisabled} />
+          <Text style={styles.emptyText}>No hay turnos registrados para este local.</Text>
+        </View>
+      ) : (
+        <ScrollView
+            contentContainerStyle={styles.list}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLOR.brand} />}
+          >
+          {shifts.map(shift => {
+            const isOpen    = expanded[shift.id];
+            const summary   = summaries[shift.id];
+            const isLoading = loadingSum[shift.id];
+            const isClosed  = shift.status === 'CLOSED';
+
+            return (
+              <View key={shift.id} style={styles.shiftCard}>
+
+                {/* ── Fila principal del turno ── */}
+                <TouchableOpacity style={styles.shiftRow} onPress={() => toggleShift(shift)}>
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.shiftCodeRow}>
+                      <Text style={styles.shiftCode}>{shift.code}</Text>
+                      <View style={[styles.statusBadge, isClosed ? styles.statusClosed : styles.statusOpen]}>
+                        <Text style={styles.statusText}>{isClosed ? 'Cerrado' : 'Abierto'}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.shiftMeta}>
+                      {formatDate(shift.openedAt)}  ·  {formatTime(shift.openedAt)}
+                      {shift.closedAt ? ` — ${formatTime(shift.closedAt)}` : ''}
+                      {' · '}{shift.username}
+                    </Text>
+                  </View>
+                  <MaterialCommunityIcons name={isOpen ? 'chevron-up' : 'chevron-down'} size={18} color={COLOR.inkMute} />
+                </TouchableOpacity>
+
+                {/* ── Detalle expandible ── */}
+                {isOpen && (
+                  <View style={styles.detail}>
+                    {isLoading ? (
+                      <ActivityIndicator color={COLOR.brand} style={{ margin: 12 }} />
+                    ) : summary && summary.totalSales > 0 ? (
+                      <>
+                        {/* Tabla de productos */}
+                        <View style={styles.detailHeader}>
+                          <Text style={[styles.detailCol, styles.detailColName]}>Producto</Text>
+                          <Text style={[styles.detailCol, { width: 44, textAlign: 'center' }]}>Cant.</Text>
+                          <Text style={[styles.detailCol, { width: 88, textAlign: 'right' }]}>Subtotal</Text>
+                        </View>
+                        {summary.productSummary.map((p, i) => (
+                          <View key={i} style={styles.detailRow}>
+                            <Text style={[styles.detailCell, styles.detailColName]} numberOfLines={1}>{p.productName}</Text>
+                            <Text style={[styles.detailCell, { width: 44, textAlign: 'center' }]}>{p.quantity}</Text>
+                            <Text style={[styles.detailCell, { width: 88, textAlign: 'right' }]}>{formatHnl(p.subtotal)}</Text>
+                          </View>
+                        ))}
+
+                        {/* Totales */}
+                        <View style={styles.detailTotals}>
+                          <View style={styles.totalLine}>
+                            <Text style={styles.totalLabel}>{summary.totalSales} venta{summary.totalSales !== 1 ? 's' : ''}</Text>
+                            <Text style={styles.totalLabel}>Subtotal: {formatHnl(summary.totalSubtotal)}</Text>
+                          </View>
+                          <View style={[styles.totalLine, styles.totalFinal]}>
+                            <Text style={styles.totalFinalLabel}>TOTAL</Text>
+                            <Text style={styles.totalFinalAmount}>{formatHnl(summary.totalAmount)}</Text>
+                          </View>
+                        </View>
+                      </>
+                    ) : (
+                      <Text style={styles.noSalesText}>
+                        {summary ? 'Turno sin ventas registradas.' : 'No se pudo cargar el resumen.'}
+                      </Text>
+                    )}
+                  </View>
+                )}
+              </View>
+            );
+          })}
+
+          {/* ── Cargar más ── */}
+          {hasMore && (
+            <TouchableOpacity
+              style={styles.loadMoreBtn}
+              onPress={loadMore}
+              disabled={loadingMore}
+            >
+              {loadingMore
+                ? <ActivityIndicator size="small" color={COLOR.brand} />
+                : <Text style={styles.loadMoreText}>Cargar más turnos</Text>
+              }
             </TouchableOpacity>
-          ) : null
-        }
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <MaterialCommunityIcons name="receipt-text-outline" size={64} color={COLOR.inkMute} />
-            <Text style={styles.emptyTxt}>Sin ventas en este período</Text>
-          </View>
-        }
-      />
+          )}
+          {!hasMore && shifts.length > 0 && (
+            <Text style={styles.noMoreText}>— Fin del historial —</Text>
+          )}
+        </ScrollView>
+      )}
     </View>
   );
 }
 
+// ─── Estilos ─────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLOR.bg },
+  root:           { flex: 1, backgroundColor: COLOR.bg },
 
-  appbar: {
-    height: 56, flexDirection: 'row', alignItems: 'center', gap: SPACE.s2,
-    paddingHorizontal: SPACE.s3, backgroundColor: COLOR.surface,
-    borderBottomWidth: 1, borderBottomColor: COLOR.border,
-  },
-  back: { width: 40, height: 40, borderRadius: RADIUS.full, justifyContent: 'center', alignItems: 'center' },
-  title: { flex: 1, fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold, color: COLOR.ink },
+  header:         { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: SPACE.s3, padding: SPACE.s4, backgroundColor: COLOR.surface, borderBottomWidth: 1, borderBottomColor: COLOR.border },
+  headerTitle:    { fontSize: FONT_SIZE.h1, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, flex: 1 },
+  storeChips:     { flexDirection: 'row', gap: SPACE.s2 },
+  chip:           { paddingHorizontal: SPACE.s4, paddingVertical: 7, borderRadius: RADIUS.full, backgroundColor: COLOR.bg, borderWidth: 1, borderColor: COLOR.border },
+  chipActive:     { backgroundColor: COLOR.brand, borderColor: COLOR.brandDark },
+  chipText:       { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.semibold as any, color: COLOR.ink2 },
+  chipTextActive: { color: COLOR.ink, fontWeight: FONT_WEIGHT.bold as any },
 
-  chips: { gap: SPACE.s2, paddingHorizontal: SPACE.s4, paddingVertical: SPACE.s3 },
-  chip: {
-    height: CONTROL.chipH, paddingHorizontal: SPACE.s4, borderRadius: RADIUS.full,
-    borderWidth: 1, borderColor: COLOR.border, backgroundColor: COLOR.surface, justifyContent: 'center',
-  },
-  chipOn: { backgroundColor: COLOR.brand, borderColor: COLOR.brand },
-  chipTxt: { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.semibold, color: COLOR.ink2 },
-  chipTxtOn: { color: COLOR.inkOnBrand },
+  empty:          { flex: 1, justifyContent: 'center', alignItems: 'center', gap: SPACE.s2, padding: SPACE.s8 },
+  emptyText:      { fontSize: FONT_SIZE.body, color: COLOR.inkMute, fontWeight: FONT_WEIGHT.semibold as any, textAlign: 'center' },
+  error:          { textAlign: 'center', color: COLOR.expense, marginTop: 40, fontWeight: FONT_WEIGHT.semibold as any },
 
-  summary: {
-    marginHorizontal: SPACE.s4, marginBottom: SPACE.s3,
-    backgroundColor: COLOR.surface, borderWidth: 1, borderColor: COLOR.border,
-    borderLeftWidth: 4, borderLeftColor: COLOR.income, borderRadius: RADIUS.r3,
-    padding: SPACE.s4, ...SHADOW.sm,
-  },
-  sumLbl: { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.semibold, color: COLOR.inkMute, letterSpacing: 0.5 },
-  sumAmt: { fontSize: 34, fontWeight: FONT_WEIGHT.bold, color: COLOR.income, fontFamily: 'JetBrainsMono', marginTop: SPACE.s1 },
-  sumSub: { fontSize: FONT_SIZE.label, color: COLOR.ink2 },
-  split: { flexDirection: 'row', gap: SPACE.s4, marginTop: SPACE.s3, paddingTop: SPACE.s3, borderTopWidth: 1, borderTopColor: COLOR.border },
-  splitItem: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s1 },
-  splitTxt: { fontSize: FONT_SIZE.caption, color: COLOR.ink2 },
+  list:           { padding: SPACE.s4, gap: SPACE.s2 },
 
-  sale: { backgroundColor: COLOR.surface, borderBottomWidth: 1, borderBottomColor: COLOR.border },
-  saleHead: { padding: SPACE.s4 },
-  l1: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s2 },
-  time: { fontSize: FONT_SIZE.label, color: COLOR.inkMute, fontFamily: 'JetBrainsMono' },
-  pillPay: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s1, paddingVertical: 2, paddingHorizontal: SPACE.s2, borderRadius: RADIUS.full, backgroundColor: COLOR.infoTint },
-  pillPayTxt: { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.semibold, color: COLOR.info },
-  pillState: { marginLeft: 'auto', paddingVertical: 2, paddingHorizontal: SPACE.s2, borderRadius: RADIUS.full },
-  pillActive: { backgroundColor: COLOR.incomeTint },
-  pillCancel: { backgroundColor: COLOR.expenseTint },
-  pillActiveTxt: { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.semibold, color: COLOR.income },
-  pillCancelTxt: { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.semibold, color: COLOR.expense },
+  loadMoreBtn:    { margin: SPACE.s4, padding: SPACE.s3, borderRadius: RADIUS.r2, borderWidth: 1, borderColor: COLOR.border, alignItems: 'center', backgroundColor: COLOR.surface },
+  loadMoreText:   { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.semibold as any, color: COLOR.ink2 },
+  noMoreText:     { textAlign: 'center', color: COLOR.inkDisabled, fontSize: FONT_SIZE.caption, padding: SPACE.s4 },
 
-  l2: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s4, marginTop: SPACE.s2 },
-  who: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s1 },
-  whoTxt: { fontSize: FONT_SIZE.caption, color: COLOR.inkMute },
-  amt: { marginLeft: 'auto', fontSize: FONT_SIZE.amount, fontWeight: FONT_WEIGHT.bold, color: COLOR.income, fontFamily: 'JetBrainsMono' },
-  amtCancel: { color: COLOR.inkMute, textDecorationLine: 'line-through' },
-  prods: { fontSize: FONT_SIZE.caption, color: COLOR.inkMute, marginTop: SPACE.s2 },
+  shiftCard:      { backgroundColor: COLOR.surface, borderRadius: RADIUS.r3, borderWidth: 1, borderColor: COLOR.border, overflow: 'hidden', ...SHADOW.sm },
+  shiftRow:       { flexDirection: 'row', alignItems: 'center', padding: SPACE.s4, gap: SPACE.s2 },
+  shiftCodeRow:   { flexDirection: 'row', alignItems: 'center', gap: SPACE.s2, marginBottom: SPACE.s1 },
+  shiftCode:      { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
+  shiftMeta:      { fontSize: FONT_SIZE.caption, color: COLOR.inkMute, fontWeight: FONT_WEIGHT.medium as any },
 
-  detail: { backgroundColor: COLOR.bg, padding: SPACE.s4, borderTopWidth: 1, borderTopColor: COLOR.border },
-  detailId: { fontSize: FONT_SIZE.caption, color: COLOR.inkMute, fontFamily: 'JetBrainsMono', marginBottom: SPACE.s3 },
-  ditem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5, gap: SPACE.s2 },
-  dName: { flex: 1, fontSize: FONT_SIZE.label, color: COLOR.ink },
-  dQty: { fontSize: FONT_SIZE.label, color: COLOR.inkMute, fontFamily: 'JetBrainsMono' },
-  dSt: { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.semibold, color: COLOR.ink, fontFamily: 'JetBrainsMono', minWidth: 74, textAlign: 'right' },
-  dsep: { height: 1, backgroundColor: COLOR.border2, marginVertical: SPACE.s2 },
-  dtot: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
-  dtotL: { fontSize: FONT_SIZE.label, color: COLOR.ink2 },
-  dtotV: { fontSize: FONT_SIZE.label, color: COLOR.ink2, fontFamily: 'JetBrainsMono' },
-  grandL: { fontSize: FONT_SIZE.body, fontWeight: FONT_WEIGHT.bold, color: COLOR.ink },
-  grandV: { fontSize: FONT_SIZE.body, fontWeight: FONT_WEIGHT.bold, color: COLOR.ink, fontFamily: 'JetBrainsMono' },
-  cancelBtn: {
-    marginTop: SPACE.s3, height: CONTROL.buttonSmH, borderRadius: RADIUS.r2,
-    borderWidth: 1, borderColor: COLOR.expense, justifyContent: 'center', alignItems: 'center',
-  },
-  cancelTxt: { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.semibold, color: COLOR.expense },
+  statusBadge:    { borderRadius: RADIUS.r2, paddingHorizontal: SPACE.s2, paddingVertical: 3 },
+  statusOpen:     { backgroundColor: COLOR.incomeTint },
+  statusClosed:   { backgroundColor: COLOR.surface2 },
+  statusText:     { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink2 },
 
-  loadMore: {
-    alignSelf: 'center', marginVertical: SPACE.s4, paddingVertical: SPACE.s2, paddingHorizontal: SPACE.s5,
-    borderRadius: RADIUS.r2, borderWidth: 1, borderColor: COLOR.border2, backgroundColor: COLOR.surface,
-  },
-  loadMoreTxt: { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.semibold, color: COLOR.ink2 },
+  detail:         { borderTopWidth: 1, borderTopColor: COLOR.border, padding: SPACE.s4, backgroundColor: COLOR.bgAlt },
 
-  empty: { paddingVertical: SPACE.s8, alignItems: 'center' },
-  emptyTxt: { fontSize: FONT_SIZE.h3, color: COLOR.inkMute, marginTop: SPACE.s3 },
+  detailHeader:   { flexDirection: 'row', paddingBottom: SPACE.s2, borderBottomWidth: 1, borderBottomColor: COLOR.border, marginBottom: SPACE.s1 },
+  detailRow:      { flexDirection: 'row', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: COLOR.border },
+  detailCol:      { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.inkMute },
+  detailCell:     { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.medium as any, color: COLOR.ink },
+  detailColName:  { flex: 1 },
+
+  detailTotals:   { marginTop: SPACE.s2, gap: SPACE.s1 },
+  totalLine:      { flexDirection: 'row', justifyContent: 'space-between' },
+  totalFinal:     { borderTopWidth: 2, borderTopColor: COLOR.ink, paddingTop: SPACE.s2, marginTop: SPACE.s1 },
+  totalLabel:     { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.semibold as any, color: COLOR.inkMute },
+  totalFinalLabel:{ fontSize: FONT_SIZE.body, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
+  totalFinalAmount:{ fontSize: FONT_SIZE.h2, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
+
+  noSalesText:    { fontSize: FONT_SIZE.label, color: COLOR.inkMute, fontWeight: FONT_WEIGHT.semibold as any, textAlign: 'center', padding: SPACE.s2 },
 });
-
-// ─── Connected wrapper (default export) ──────────────────────────────────────
-// Obtiene el turno activo y sus ventas del backend. Pasa datos al componente puro.
-
-function formatHora(dt: string | undefined): string {
-  if (!dt) return '—';
-  try { return new Date(dt).toLocaleTimeString('es-HN', { hour: '2-digit', minute: '2-digit' }); }
-  catch { return '—'; }
-}
-
-export default function SalesHistoryScreen() {
-  const { selectedStore } = useStore();
-  const { roles, userName } = useAuth();
-  const isAdmin = roles.includes('admin') || roles.includes('root');
-
-  const [sales, setSales]     = useState<Sale[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [shiftId, setShiftId] = useState<number | null>(null);
-
-  const summary: Summary = useMemo(() => {
-    const total    = sales.filter(s => s.estado === 'activa').reduce((a, s) => a + s.total, 0);
-    const efectivo = sales.filter(s => s.estado === 'activa' && s.metodo === 'efectivo').reduce((a, s) => a + s.total, 0);
-    const tarjeta  = sales.filter(s => s.estado === 'activa' && s.metodo === 'tarjeta').reduce((a, s) => a + s.total, 0);
-    return { total, cantidad: sales.filter(s => s.estado === 'activa').length, efectivo, tarjeta };
-  }, [sales]);
-
-  const fetchSales = async () => {
-    if (!selectedStore) return;
-    setLoading(true);
-    try {
-      // 1. Turno activo del local
-      const shiftRes = await axios.get(
-        `${REACT_APP_API_URL}/api/v2/shifts/active/${selectedStore.id}`,
-      );
-      if (shiftRes.status === 204 || !shiftRes.data?.id) {
-        setSales([]); setLoading(false); return;
-      }
-      const sid: number = shiftRes.data.id;
-      setShiftId(sid);
-
-      // 2. Ventas del turno
-      const { data } = await axios.get(`${REACT_APP_API_URL}/api/v2/shifts/${sid}/sales`);
-      const mapped: Sale[] = data.map((s: any) => ({
-        id:               String(s.id),
-        hora:             formatHora(s.createdAt),
-        metodo:           (s.paymentMethod ?? 'efectivo').toLowerCase() === 'tarjeta' ? 'tarjeta' : 'efectivo',
-        estado:           (s.status ?? 'ACTIVE').toUpperCase() === 'CANCELLED' ? 'cancelada' : 'activa',
-        usuario:          s.username ?? '—',
-        local:            s.storeName ?? selectedStore.name,
-        total:            Number(s.total ?? 0),
-        subtotal:         Number(s.subtotal ?? 0),
-        impuesto:         Number(s.isv ?? 0),
-        items:            (s.items ?? []).map((it: any) => ({
-          nombre:     it.productName ?? it.nombre ?? '—',
-          cantidad:   it.quantity ?? it.cantidad ?? 1,
-          precioUnit: Number(it.unitPrice ?? it.precio ?? 0),
-        })),
-        resumenProductos: (s.items ?? [])
-          .map((it: any) => `${it.productName ?? it.nombre} ×${it.quantity ?? it.cantidad}`)
-          .join(', '),
-      }));
-      setSales(mapped);
-    } catch (e) {
-      console.error('[SalesHistoryScreen] fetch error', e);
-      setSales([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchSales(); }, [selectedStore?.id]);
-
-  const handleCancel = async (saleId: string) => {
-    try {
-      await axios.delete(`${REACT_APP_API_URL}/api/v2/sales/${saleId}`);
-      fetchSales();
-    } catch (e) {
-      console.error('[SalesHistoryScreen] cancel error', e);
-    }
-  };
-
-  if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLOR.bg }}>
-        <ActivityIndicator size="large" color={COLOR.brand} />
-      </View>
-    );
-  }
-
-  return (
-    <SalesHistoryView
-      sales={sales}
-      summary={summary}
-      isAdmin={isAdmin}
-      onBack={() => {}}
-      onCancelSale={handleCancel}
-      hasMore={false}
-    />
-  );
-}

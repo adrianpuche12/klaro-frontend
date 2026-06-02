@@ -1,168 +1,258 @@
-// =============================================================================
-// StoresScreen.tsx  ·  screens/StoresScreen.tsx
-// Gestión de locales (solo root). Lista + modal nuevo/editar.
-// Sin emojis, sin inline styles, sin hex. Conectá tu API real de locales.
-// =============================================================================
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Modal, ActivityIndicator } from 'react-native';
-import axios from 'axios';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  Modal,
+} from 'react-native';
+import { Button, TextInput, Snackbar, IconButton } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import { COLOR, SPACE, FONT_SIZE, FONT_WEIGHT, RADIUS, CONTROL, SHADOW } from '../theme';
+import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../theme';
 import { useStore } from '../context/StoreContext';
 
-interface Store { id: string; nombre: string; direccion: string; telefono: string; activo: boolean; empleados: number; }
-
-interface Props {
-  stores: Store[];
-  onBack: () => void;
-  onSave: (store: Partial<Store> & { nombre: string }) => void;
+interface Store {
+  id: number;
+  name: string;
+  address: string | null;
+  phone: string | null;
+  active: boolean;
 }
 
-function StoresView({ stores, onBack, onSave }: Props) {
-  const [editing, setEditing] = useState<Store | 'new' | null>(null);
+interface StoreForm {
+  name: string;
+  address: string;
+  phone: string;
+}
 
-  const renderStore = ({ item }: { item: Store }) => (
-    <TouchableOpacity style={styles.row} onPress={() => setEditing(item)}>
-      <View style={styles.ico}><MaterialCommunityIcons name="store-outline" size={24} color={COLOR.info} /></View>
-      <View style={styles.flex}>
-        <Text style={styles.name}>{item.nombre}</Text>
-        <View style={styles.meta}>
-          <View style={[styles.stBadge, item.activo ? styles.stActive : styles.stInactive]}>
-            <Text style={[styles.stTxt, item.activo ? styles.stActiveTxt : styles.stInactiveTxt]}>{item.activo ? 'Activo' : 'Inactivo'}</Text>
-          </View>
-          <Text style={styles.metaTxt}>· {item.empleados} {item.empleados === 1 ? 'empleado' : 'empleados'}</Text>
-        </View>
-      </View>
-      <MaterialCommunityIcons name="chevron-right" size={18} color={COLOR.inkMute} />
-    </TouchableOpacity>
-  );
+const EMPTY_FORM: StoreForm = { name: '', address: '', phone: '' };
+
+const StoresScreen = () => {
+  const { refreshStores: refreshContext } = useStore();
+  const [stores, setStores]             = useState<Store[]>([]);
+  const [loading, setLoading]           = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [editingStore, setEditingStore] = useState<Store | null>(null);
+  const [form, setForm]                 = useState<StoreForm>(EMPTY_FORM);
+  const [saving, setSaving]             = useState(false);
+  const [snackbar, setSnackbar]         = useState('');
+  const [confirmDlg, setConfirmDlg]     = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
+  const askConfirm = (title: string, message: string, onConfirm: () => void) =>
+    setConfirmDlg({ title, message, onConfirm });
+
+  const API = `${REACT_APP_API_URL}/api/v2/stores`;
+
+  const loadStores = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await axios.get<Store[]>(API);
+      setStores(res.data);
+    } catch {
+      setSnackbar('Error al cargar los locales');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadStores(); }, [loadStores]);
+
+  const openCreate = () => {
+    setEditingStore(null);
+    setForm(EMPTY_FORM);
+    setModalVisible(true);
+  };
+
+  const openEdit = (store: Store) => {
+    setEditingStore(store);
+    setForm({ name: store.name, address: store.address ?? '', phone: store.phone ?? '' });
+    setModalVisible(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.name.trim()) { setSnackbar('El nombre es obligatorio'); return; }
+    setSaving(true);
+    try {
+      if (editingStore) {
+        await axios.put(`${API}/${editingStore.id}`, form);
+        setSnackbar('Local actualizado');
+      } else {
+        await axios.post(API, form);
+        setSnackbar('Local creado');
+      }
+      setModalVisible(false);
+      loadStores();
+      refreshContext();
+    } catch {
+      setSnackbar('Error al guardar');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggle = (store: Store) => {
+    const accion = store.active ? 'desactivar' : 'activar';
+    askConfirm(
+      `${store.active ? 'Desactivar' : 'Activar'} local`,
+      `¿Querés ${accion} el local "${store.name}"?`,
+      async () => {
+        try {
+          await axios.put(`${API}/${store.id}/toggle`);
+          setSnackbar(`Local ${store.active ? 'desactivado' : 'activado'}`);
+          loadStores();
+          refreshContext();
+        } catch { setSnackbar('Error al cambiar estado'); }
+        finally { setConfirmDlg(null); }
+      }
+    );
+  };
+
+  const handleDelete = (store: Store) => {
+    askConfirm(
+      'Eliminar local',
+      `¿Eliminar "${store.name}"? Esta acción no se puede deshacer.`,
+      async () => {
+        try {
+          await axios.delete(`${API}/${store.id}`);
+          setSnackbar('Local eliminado');
+          loadStores();
+          refreshContext();
+        } catch (e: any) {
+          setSnackbar(e.response?.data?.error || 'No se puede eliminar — tiene historial de operaciones');
+        } finally { setConfirmDlg(null); }
+      }
+    );
+  };
 
   return (
     <View style={styles.container}>
-      <View style={styles.appbar}>
-        <TouchableOpacity style={styles.back} onPress={onBack}><MaterialCommunityIcons name="chevron-left" size={24} color={COLOR.ink} /></TouchableOpacity>
+      {/* Header */}
+      <View style={styles.header}>
         <Text style={styles.title}>Locales</Text>
-        <TouchableOpacity style={styles.newBtn} onPress={() => setEditing('new')}>
-          <MaterialCommunityIcons name="plus" size={16} color={COLOR.inkOnBrand} />
-          <Text style={styles.newTxt}>Nuevo</Text>
-        </TouchableOpacity>
+        <Button mode="contained" onPress={openCreate} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand}>
+          + Nuevo Local
+        </Button>
       </View>
 
-      <FlatList data={stores} renderItem={renderStore} keyExtractor={s => s.id}
-        ListEmptyComponent={<View style={styles.empty}><MaterialCommunityIcons name="store-search-outline" size={56} color={COLOR.inkMute} /><Text style={styles.emptyTxt}>Sin locales</Text></View>} />
+      {/* Lista */}
+      {loading ? (
+        <ActivityIndicator size="large" color={COLOR.brand} style={styles.loader} />
+      ) : (
+        <ScrollView contentContainerStyle={styles.list}>
+          {stores.length === 0 ? (
+            <Text style={styles.empty}>No hay locales registrados.</Text>
+          ) : (
+            stores.map(store => (
+              <View key={store.id} style={styles.card}>
+                <View style={styles.cardInfo}>
+                  <View style={styles.cardRow}>
+                    <Text style={styles.storeName}>{store.name}</Text>
+                    <View style={[styles.badge, store.active ? styles.badgeActive : styles.badgeInactive]}>
+                      <Text style={[styles.badgeText, { color: store.active ? COLOR.income : COLOR.expense }]}>
+                        {store.active ? 'Activo' : 'Inactivo'}
+                      </Text>
+                    </View>
+                  </View>
+                  {store.address ? (
+                    <View style={styles.storeDetailRow}>
+                      <MaterialCommunityIcons name="map-marker-outline" size={13} color={COLOR.inkMute} />
+                      <Text style={styles.storeDetail}>{store.address}</Text>
+                    </View>
+                  ) : null}
+                  {store.phone ? (
+                    <View style={styles.storeDetailRow}>
+                      <MaterialCommunityIcons name="phone-outline" size={13} color={COLOR.inkMute} />
+                      <Text style={styles.storeDetail}>{store.phone}</Text>
+                    </View>
+                  ) : null}
+                </View>
 
-      <StoreModal
-        store={editing === 'new' ? null : editing}
-        visible={editing !== null}
-        onClose={() => setEditing(null)}
-        onSubmit={(d) => { onSave(d); setEditing(null); }}
-      />
-    </View>
-  );
-}
+                <View style={styles.cardActions}>
+                  {/* Editar */}
+                  <IconButton
+                    icon="pencil"
+                    size={22}
+                    iconColor={COLOR.ink2}
+                    onPress={() => openEdit(store)}
+                  />
+                  {/* Activar / Desactivar */}
+                  <IconButton
+                    icon={store.active ? 'toggle-switch' : 'toggle-switch-off'}
+                    size={22}
+                    iconColor={store.active ? COLOR.income : COLOR.inkDisabled}
+                    onPress={() => handleToggle(store)}
+                  />
+                  {/* Eliminar */}
+                  <IconButton
+                    icon="trash-can"
+                    size={22}
+                    iconColor={COLOR.expense}
+                    onPress={() => handleDelete(store)}
+                  />
+                </View>
+              </View>
+            ))
+          )}
+        </ScrollView>
+      )}
 
-function StoreModal({ store, visible, onClose, onSubmit }: { store: Store | null; visible: boolean; onClose: () => void; onSubmit: (d: any) => void; }) {
-  const [nombre, setNombre] = useState(store?.nombre ?? '');
-  const [direccion, setDireccion] = useState(store?.direccion ?? '');
-  const [telefono, setTelefono] = useState(store?.telefono ?? '');
-  const [activo, setActivo] = useState(store?.activo ?? true);
-  React.useEffect(() => {
-    if (visible) { setNombre(store?.nombre ?? ''); setDireccion(store?.direccion ?? ''); setTelefono(store?.telefono ?? ''); setActivo(store?.activo ?? true); }
-  }, [visible, store]);
+      {/* Modal crear/editar */}
+      <Modal visible={modalVisible} transparent animationType="fade" onRequestClose={() => setModalVisible(false)}>
+        <View style={styles.overlay}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>{editingStore ? 'Editar Local' : 'Nuevo Local'}</Text>
 
-  return (
-    <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalOv}>
-        <View style={styles.modal}>
-          <Text style={styles.modalTitle}>{store ? 'Editar local' : 'Nuevo local'}</Text>
-          <View style={styles.field}><Text style={styles.fLabel}>Nombre del local</Text><TextInput style={styles.input} value={nombre} onChangeText={setNombre} placeholder="Ej: Sucursal Centro" placeholderTextColor={COLOR.inkDisabled} /></View>
-          <View style={styles.field}><Text style={styles.fLabel}>Dirección</Text><TextInput style={styles.input} value={direccion} onChangeText={setDireccion} placeholder="Calle / barrio / ciudad" placeholderTextColor={COLOR.inkDisabled} /></View>
-          <View style={styles.field}><Text style={styles.fLabel}>Teléfono</Text><TextInput style={styles.input} value={telefono} onChangeText={setTelefono} keyboardType="phone-pad" placeholder="+504 0000-0000" placeholderTextColor={COLOR.inkDisabled} /></View>
-          <View style={styles.field}>
-            <Text style={styles.fLabel}>Estado</Text>
-            <View style={styles.seg}>
-              <TouchableOpacity style={[styles.segBtn, activo && styles.segOn]} onPress={() => setActivo(true)}><Text style={[styles.segTxt, activo && styles.segTxtOn]}>Activo</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.segBtn, !activo && styles.segOn]} onPress={() => setActivo(false)}><Text style={[styles.segTxt, !activo && styles.segTxtOn]}>Inactivo</Text></TouchableOpacity>
+            <TextInput label="Nombre *" value={form.name} onChangeText={v => setForm({ ...form, name: v })} style={styles.input} mode="outlined" />
+            <TextInput label="Dirección" value={form.address} onChangeText={v => setForm({ ...form, address: v })} style={styles.input} mode="outlined" />
+            <TextInput label="Teléfono" value={form.phone} onChangeText={v => setForm({ ...form, phone: v })} style={styles.input} mode="outlined" keyboardType="phone-pad" />
+
+            <View style={styles.modalActions}>
+              <Button mode="outlined" onPress={() => setModalVisible(false)} style={{ flex: 1 }}>Cancelar</Button>
+              <Button mode="contained" onPress={handleSave} loading={saving} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Guardar</Button>
             </View>
           </View>
-          <View style={styles.fActions}>
-            <TouchableOpacity style={styles.fCancel} onPress={onClose}><Text style={styles.fCancelTxt}>Cancelar</Text></TouchableOpacity>
-            <TouchableOpacity style={[styles.fSave, !nombre && styles.fSaveDis]} disabled={!nombre} onPress={() => onSubmit({ id: store?.id, nombre, direccion, telefono, activo })}><Text style={styles.fSaveTxt}>Guardar</Text></TouchableOpacity>
-          </View>
         </View>
-      </View>
-    </Modal>
+      </Modal>
+
+      <ConfirmDialog
+        visible={!!confirmDlg}
+        title={confirmDlg?.title ?? ''}
+        message={confirmDlg?.message ?? ''}
+        confirmLabel="Sí, confirmar"
+        onConfirm={() => confirmDlg?.onConfirm()}
+        onCancel={() => setConfirmDlg(null)}
+      />
+      <Snackbar visible={!!snackbar} onDismiss={() => setSnackbar('')} duration={2500}>{snackbar}</Snackbar>
+    </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLOR.bg }, flex: { flex: 1 },
-  appbar: { height: 56, flexDirection: 'row', alignItems: 'center', gap: SPACE.s2, paddingHorizontal: SPACE.s3, backgroundColor: COLOR.surface, borderBottomWidth: 1, borderBottomColor: COLOR.border },
-  back: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  title: { flex: 1, fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold, color: COLOR.ink },
-  newBtn: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s1, height: CONTROL.buttonSmH, paddingHorizontal: SPACE.s3, borderRadius: RADIUS.r2, backgroundColor: COLOR.brand },
-  newTxt: { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.bold, color: COLOR.inkOnBrand },
-
-  row: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s3, padding: SPACE.s4, backgroundColor: COLOR.surface, borderBottomWidth: 1, borderBottomColor: COLOR.border },
-  ico: { width: 40, height: 40, borderRadius: RADIUS.r2, backgroundColor: COLOR.infoTint, justifyContent: 'center', alignItems: 'center' },
-  name: { fontSize: FONT_SIZE.body, fontWeight: FONT_WEIGHT.semibold, color: COLOR.ink },
-  meta: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s2, marginTop: 3 },
-  metaTxt: { fontSize: FONT_SIZE.caption, color: COLOR.inkMute },
-  stBadge: { paddingHorizontal: SPACE.s2, paddingVertical: 1, borderRadius: RADIUS.full },
-  stActive: { backgroundColor: COLOR.incomeTint }, stInactive: { backgroundColor: COLOR.surface2 },
-  stTxt: { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.semibold },
-  stActiveTxt: { color: COLOR.income }, stInactiveTxt: { color: COLOR.inkMute },
-
-  empty: { paddingVertical: SPACE.s8, alignItems: 'center' },
-  emptyTxt: { fontSize: FONT_SIZE.h3, color: COLOR.inkMute, marginTop: SPACE.s3 },
-
-  modalOv: { flex: 1, justifyContent: 'center', backgroundColor: 'COLOR.overlay', padding: SPACE.s4 },
-  modal: { backgroundColor: COLOR.surface, borderRadius: RADIUS.r4, padding: SPACE.s5, ...SHADOW.lg },
-  modalTitle: { fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold, color: COLOR.ink, marginBottom: SPACE.s4 },
-  field: { marginBottom: SPACE.s3 },
-  fLabel: { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.medium, color: COLOR.ink2, marginBottom: SPACE.s1 },
-  input: { height: CONTROL.inputH, borderWidth: 1, borderColor: COLOR.border2, borderRadius: RADIUS.r2, paddingHorizontal: SPACE.s3, fontSize: FONT_SIZE.body, color: COLOR.ink, backgroundColor: COLOR.surface },
-  seg: { flexDirection: 'row', gap: SPACE.s2 },
-  segBtn: { flex: 1, height: 44, borderRadius: RADIUS.r2, borderWidth: 1, borderColor: COLOR.border2, backgroundColor: COLOR.surface, justifyContent: 'center', alignItems: 'center' },
-  segOn: { backgroundColor: COLOR.brandTint, borderColor: COLOR.brand },
-  segTxt: { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.semibold, color: COLOR.ink2 }, segTxtOn: { color: COLOR.brandDeep },
-  fActions: { flexDirection: 'row', gap: SPACE.s2, marginTop: SPACE.s5 },
-  fCancel: { flex: 1, height: CONTROL.buttonH, borderRadius: RADIUS.r2, borderWidth: 1, borderColor: COLOR.border2, backgroundColor: COLOR.surface, justifyContent: 'center', alignItems: 'center' },
-  fCancelTxt: { fontSize: FONT_SIZE.body, fontWeight: FONT_WEIGHT.bold, color: COLOR.ink2 },
-  fSave: { flex: 1, height: CONTROL.buttonH, borderRadius: RADIUS.r2, backgroundColor: COLOR.brand, justifyContent: 'center', alignItems: 'center' },
-  fSaveDis: { opacity: 0.5 },
-  fSaveTxt: { fontSize: FONT_SIZE.body, fontWeight: FONT_WEIGHT.bold, color: COLOR.inkOnBrand },
+  container:    { flex: 1, backgroundColor: COLOR.bg },
+  header:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: SPACE.s4, backgroundColor: COLOR.surface, borderBottomWidth: 1, borderBottomColor: COLOR.border },
+  title:        { fontSize: FONT_SIZE.h1, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
+  loader:       { marginTop: 40 },
+  list:         { padding: SPACE.s4, gap: SPACE.s3 },
+  empty:        { textAlign: 'center', marginTop: 40, color: COLOR.inkMute, fontSize: FONT_SIZE.body },
+  card:         { flexDirection: 'row', alignItems: 'center', backgroundColor: COLOR.surface, borderRadius: RADIUS.r3, padding: SPACE.s4, borderWidth: 1, borderColor: COLOR.border, ...SHADOW.sm },
+  cardInfo:     { flex: 1 },
+  cardRow:      { flexDirection: 'row', alignItems: 'center', gap: SPACE.s2, marginBottom: SPACE.s1 },
+  storeName:    { fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
+  storeDetail:     { fontSize: FONT_SIZE.label, color: COLOR.inkMute, marginLeft: 4 },
+  storeDetailRow:  { flexDirection: 'row', alignItems: 'center', marginTop: 3 },
+  badge:        { borderRadius: RADIUS.r1, paddingHorizontal: SPACE.s2, paddingVertical: 2 },
+  badgeActive:  { backgroundColor: COLOR.incomeTint },
+  badgeInactive:{ backgroundColor: COLOR.expenseTint },
+  badgeText:    { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any },
+  cardActions:  { flexDirection: 'row', alignItems: 'center' },
+  overlay:      { flex: 1, backgroundColor: COLOR.overlay, justifyContent: 'center', alignItems: 'center' },
+  modal:        { backgroundColor: COLOR.surface, borderRadius: RADIUS.r4, padding: SPACE.s5, width: '90%', maxWidth: 440 },
+  modalTitle:   { fontSize: FONT_SIZE.h1, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, marginBottom: SPACE.s4 },
+  input:        { marginBottom: SPACE.s3 },
+  modalActions: { flexDirection: 'row', gap: SPACE.s3, marginTop: SPACE.s2 },
 });
 
-// ─── Connected wrapper ────────────────────────────────────────────────────────
-export default function StoresScreen() {
-  const { stores: ctxStores, refreshStores } = useStore();
-  const [stores, setStores] = useState<Store[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchStores = async () => {
-    try {
-      const { data } = await axios.get(`${REACT_APP_API_URL}/api/v2/stores`);
-      setStores((data ?? []).map((s: any) => ({
-        id: String(s.id), nombre: s.name, direccion: s.address ?? '', telefono: s.phone ?? '',
-        activo: s.active !== false, empleados: s.employeeCount ?? 0,
-      })));
-    } catch (e) { console.error('[StoresScreen]', e); }
-    finally { setLoading(false); }
-  };
-
-  useEffect(() => { fetchStores(); }, []);
-
-  if (loading) return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLOR.bg }}><ActivityIndicator size="large" color={COLOR.brand} /></View>;
-
-  return (
-    <StoresView stores={stores} onBack={() => {}}
-      onSave={async (d) => {
-        if (d.id) await axios.put(`${REACT_APP_API_URL}/api/v2/stores/${d.id}`, d);
-        else await axios.post(`${REACT_APP_API_URL}/api/v2/stores`, d);
-        fetchStores(); refreshStores();
-      }}
-    />
-  );
-}
+export default StoresScreen;

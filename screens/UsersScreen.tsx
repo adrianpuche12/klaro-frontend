@@ -1,277 +1,445 @@
-// =============================================================================
-// UsersScreen.tsx  ·  screens/UsersScreen.tsx
-// Gestión de usuarios (admin + root). Lista, búsqueda, filtros, acciones, modal.
-// Sin emojis, sin inline styles, sin hex. Conectá tu API real de usuarios.
-// Acciones destructivas SIEMPRE con confirmación (usá tu ConfirmDialog).
-// =============================================================================
-import React, { useState, useMemo, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, ScrollView, TouchableOpacity, Modal, ActivityIndicator } from 'react-native';
-import axios from 'axios';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  ActivityIndicator, Modal, useWindowDimensions,
+} from 'react-native';
+import { Button, TextInput, Snackbar, IconButton } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import { COLOR, SPACE, FONT_SIZE, FONT_WEIGHT, RADIUS, CONTROL, SHADOW } from '../theme';
-import { useAuth } from '../context/AuthContext';
-import { useStore } from '../context/StoreContext';
+import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
+import { useAuth } from '../context/AuthContext';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, BREAKPOINT } from '../theme';
 
-type Role = 'root' | 'admin' | 'user';
-type Estado = 'activo' | 'suspendido';
-interface User { id: string; nombre: string; username: string; rol: Role; estado: Estado; local: string; }
-type Filter = 'todos' | 'activos' | 'suspendidos';
+// ─── Tipos ────────────────────────────────────────────────────────────────────
 
-interface Props {
-  users: User[];
-  isRoot: boolean;
-  stores: string[];
-  onBack: () => void;
-  onCreate: (data: { nombre: string; username: string; password: string; rol: 'admin' | 'user'; local: string }) => void;
-  onEdit: (id: string) => void;
-  onResetPassword: (id: string) => void;
-  onToggleSuspend: (id: string) => void;
-  onDelete: (id: string) => void; // debe pedir confirmación antes de llamar
+interface Store { id: number; name: string; active: boolean; }
+
+interface AppUser {
+  id: number;
+  fullName: string;
+  username: string;
+  status: string;
+  storeId: number;
+  storeName: string;
+  createdAt: string;
 }
 
-const ROLE_LABEL: Record<Role, string> = { root: 'root', admin: 'admin', user: 'cajero' };
+interface UserForm {
+  fullName: string;
+  username: string;
+  password: string;
+  storeId: string;
+  role: 'user' | 'admin';
+}
 
-function UsersView({ users, isRoot, stores, onBack, onCreate, onEdit, onResetPassword, onToggleSuspend, onDelete }: Props) {
-  const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<Filter>('todos');
-  const [modalOpen, setModalOpen] = useState(false);
-  const [ctx, setCtx] = useState<User | null>(null);
+const EMPTY_FORM: UserForm = { fullName: '', username: '', password: '', storeId: '', role: 'user' };
 
-  const visible = useMemo(() => users.filter(u => {
-    const q = query.trim().toLowerCase();
-    if (q && !(u.nombre.toLowerCase().includes(q) || u.username.toLowerCase().includes(q))) return false;
-    if (filter === 'activos') return u.estado === 'activo';
-    if (filter === 'suspendidos') return u.estado === 'suspendido';
-    return true;
-  }), [users, query, filter]);
+const statusLabel = (s: string) => s === 'ACTIVE' ? 'Activo' : 'Suspendido';
+const statusColor = (s: string) => s === 'ACTIVE' ? COLOR.income : COLOR.expense;
 
-  const renderUser = ({ item }: { item: User }) => (
-    <View style={styles.row}>
-      <View style={styles.avatar}><Text style={styles.avatarTxt}>{item.nombre.charAt(0).toUpperCase()}</Text></View>
-      <View style={styles.flex}>
-        <View style={styles.nameRow}>
-          <Text style={styles.name}>{item.nombre}</Text>
-          <RoleBadge role={item.rol} />
-          {item.estado === 'suspendido' && <View style={styles.stSusp}><Text style={styles.stSuspTxt}>Suspendido</Text></View>}
-        </View>
-        <Text style={styles.username}>@{item.username}</Text>
-        <View style={styles.storeRow}>
-          <MaterialCommunityIcons name="store-outline" size={12} color={COLOR.inkMute} />
-          <Text style={styles.storeTxt}>{item.local}</Text>
-        </View>
-      </View>
-      <TouchableOpacity style={styles.dots} onPress={() => setCtx(item)}>
-        <MaterialCommunityIcons name="dots-vertical" size={20} color={COLOR.inkMute} />
-      </TouchableOpacity>
-    </View>
-  );
+// ─── UsersScreen ──────────────────────────────────────────────────────────────
+
+export default function UsersScreen() {
+  const API = REACT_APP_API_URL;
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= BREAKPOINT.desktop;
+  const { roles } = useAuth();
+  const isRoot = roles.includes('root');
+
+  const [users, setUsers]           = useState<AppUser[]>([]);
+  const [stores, setStores]         = useState<Store[]>([]);
+  const [loading, setLoading]       = useState(false);
+  const [snackbar, setSnackbar]     = useState('');
+
+  // Modal crear usuario
+  const [createModal, setCreateModal] = useState(false);
+  const [form, setForm]               = useState<UserForm>(EMPTY_FORM);
+  const [saving, setSaving]           = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Modal reasignar local
+  const [reassignModal, setReassignModal]   = useState<AppUser | null>(null);
+  const [reassignStoreId, setReassignStoreId] = useState('');
+  const [reassigning, setReassigning]       = useState(false);
+
+  // Modal reset password
+  const [resetModal, setResetModal]   = useState<AppUser | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [resetting, setResetting]     = useState(false);
+  const [showNewPwd, setShowNewPwd]   = useState(false);
+
+  // ConfirmDialog
+  const [confirmDlg, setConfirmDlg] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
+  const askConfirm = (title: string, message: string, onConfirm: () => void) =>
+    setConfirmDlg({ title, message, onConfirm });
+
+  // ── Cargar datos ───────────────────────────────────────────────────────────
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    // Carga independiente: si usuarios falla, locales igual se cargan para el formulario
+    const [usersRes, storesRes] = await Promise.allSettled([
+      axios.get<AppUser[]>(`${API}/api/v2/users`),
+      axios.get<Store[]>(`${API}/api/v2/stores/active`),
+    ]);
+    if (usersRes.status === 'fulfilled')  setUsers(usersRes.value.data);
+    else setSnackbar('Error al cargar usuarios');
+    if (storesRes.status === 'fulfilled') setStores(storesRes.value.data);
+    else setSnackbar('Error al cargar locales');
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { loadAll(); }, [loadAll]);
+
+  // ── Crear usuario ──────────────────────────────────────────────────────────
+
+  const handleCreate = async () => {
+    if (!form.fullName.trim() || !form.username.trim() || !form.password || !form.storeId) {
+      setSnackbar('Completá todos los campos'); return;
+    }
+    setSaving(true);
+    try {
+      await axios.post(`${API}/api/v2/users`, {
+        fullName: form.fullName.trim(),
+        username: form.username.trim().toLowerCase(),
+        password: form.password,
+        storeId:  Number(form.storeId),
+        role:     form.role,
+      });
+      setSnackbar('Usuario creado correctamente');
+      setCreateModal(false);
+      setForm(EMPTY_FORM);
+      loadAll();
+    } catch (e: any) {
+      setSnackbar(e.response?.data?.error || 'Error al crear usuario');
+    } finally { setSaving(false); }
+  };
+
+  // ── Suspender / Activar ────────────────────────────────────────────────────
+
+  const handleSuspend = (user: AppUser) => {
+    askConfirm(
+      'Suspender usuario',
+      `¿Suspender a "${user.fullName}"? No podrá iniciar sesión hasta que se reactive.`,
+      async () => {
+        try {
+          await axios.put(`${API}/api/v2/users/${user.id}/suspend`);
+          setSnackbar(`${user.fullName} suspendido`);
+          loadAll();
+        } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error'); }
+        finally { setConfirmDlg(null); }
+      }
+    );
+  };
+
+  const handleActivate = (user: AppUser) => {
+    askConfirm(
+      'Activar usuario',
+      `¿Reactivar el acceso de "${user.fullName}"?`,
+      async () => {
+        try {
+          await axios.put(`${API}/api/v2/users/${user.id}/activate`);
+          setSnackbar(`${user.fullName} activado`);
+          loadAll();
+        } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error'); }
+        finally { setConfirmDlg(null); }
+      }
+    );
+  };
+
+  // ── Reasignar local ────────────────────────────────────────────────────────
+
+  const handleReassign = async () => {
+    if (!reassignModal || !reassignStoreId) { setSnackbar('Seleccioná un local'); return; }
+    setReassigning(true);
+    try {
+      await axios.put(`${API}/api/v2/users/${reassignModal.id}/reassign`, { storeId: Number(reassignStoreId) });
+      setSnackbar('Local reasignado correctamente');
+      setReassignModal(null);
+      setReassignStoreId('');
+      loadAll();
+    } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error'); }
+    finally { setReassigning(false); }
+  };
+
+  // ── Reset password ─────────────────────────────────────────────────────────
+
+  const handleResetPassword = async () => {
+    if (!resetModal || !newPassword) { setSnackbar('Ingresá la nueva contraseña'); return; }
+    setResetting(true);
+    try {
+      await axios.put(`${API}/api/v2/users/${resetModal.id}/reset-password`, { password: newPassword });
+      setSnackbar('Contraseña actualizada correctamente');
+      setResetModal(null);
+      setNewPassword('');
+    } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error'); }
+    finally { setResetting(false); }
+  };
+
+  // ── Eliminar ───────────────────────────────────────────────────────────────
+
+  const handleDelete = (user: AppUser) => {
+    askConfirm(
+      'Eliminar usuario',
+      `¿Eliminar permanentemente a "${user.fullName}"? No podrá volver a iniciar sesión.`,
+      async () => {
+        try {
+          await axios.delete(`${API}/api/v2/users/${user.id}`);
+          setSnackbar('Usuario eliminado');
+          loadAll();
+        } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error al eliminar'); }
+        finally { setConfirmDlg(null); }
+      }
+    );
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <View style={styles.container}>
-      <View style={styles.appbar}>
-        <TouchableOpacity style={styles.back} onPress={onBack}><MaterialCommunityIcons name="chevron-left" size={24} color={COLOR.ink} /></TouchableOpacity>
-        <Text style={styles.title}>Usuarios del sistema</Text>
-        <TouchableOpacity style={styles.newBtn} onPress={() => setModalOpen(true)}>
-          <MaterialCommunityIcons name="plus" size={16} color={COLOR.inkOnBrand} />
-          <Text style={styles.newTxt}>Nuevo</Text>
-        </TouchableOpacity>
+    <View style={styles.root}>
+
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.headerTitleRow}>
+          <MaterialCommunityIcons name="account-multiple-outline" size={22} color={COLOR.ink} />
+          <Text style={styles.headerTitle}>Usuarios</Text>
+        </View>
+        <Button mode="contained" onPress={() => setCreateModal(true)} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ borderRadius: 10 }}>
+          + Nuevo usuario
+        </Button>
       </View>
 
-      <View style={styles.search}>
-        <MaterialCommunityIcons name="magnify" size={18} color={COLOR.inkMute} />
-        <TextInput style={styles.searchInput} placeholder="Buscar usuario..." placeholderTextColor={COLOR.inkDisabled} value={query} onChangeText={setQuery} autoCorrect={false} />
-      </View>
+      {/* Tabla */}
+      {loading ? (
+        <ActivityIndicator size="large" color={COLOR.brand} style={{ marginTop: 40 }} />
+      ) : users.length === 0 ? (
+        <View style={styles.empty}>
+          <MaterialCommunityIcons name="account-outline" size={48} color={COLOR.inkDisabled} />
+          <Text style={styles.emptyText}>No hay usuarios creados aún.</Text>
+          <Text style={styles.emptySub}>Creá el primer usuario con el botón de arriba.</Text>
+        </View>
+      ) : (
+        <ScrollView>
+          {/* Header tabla */}
+          {isDesktop && (
+            <View style={[styles.row, styles.rowHeader]}>
+              <Text style={[styles.cell, styles.cellName, styles.colHeader]}>Nombre</Text>
+              <Text style={[styles.cell, styles.cellUser, styles.colHeader]}>Usuario</Text>
+              <Text style={[styles.cell, styles.cellStore, styles.colHeader]}>Local</Text>
+              <Text style={[styles.cell, styles.cellStatus, styles.colHeader]}>Estado</Text>
+              <Text style={[styles.cell, styles.cellActions, styles.colHeader]}>Acciones</Text>
+            </View>
+          )}
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-        {([['todos', 'Todos'], ['activos', 'Activos'], ['suspendidos', 'Suspendidos']] as [Filter, string][]).map(([k, l]) => (
-          <TouchableOpacity key={k} style={[styles.chip, filter === k && styles.chipOn]} onPress={() => setFilter(k)}>
-            <Text style={[styles.chipTxt, filter === k && styles.chipTxtOn]}>{l}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+          {users.map(user => (
+            <View key={user.id} style={[styles.row, user.status === 'SUSPENDED' && styles.rowSuspended]}>
+              {/* Nombre */}
+              <View style={[styles.cell, styles.cellName]}>
+                <Text style={styles.userName}>{user.fullName}</Text>
+                {!isDesktop && <Text style={styles.userMeta}>@{user.username} · {user.storeName}</Text>}
+              </View>
 
-      <FlatList data={visible} renderItem={renderUser} keyExtractor={u => u.id}
-        ListEmptyComponent={<View style={styles.empty}><MaterialCommunityIcons name="account-search-outline" size={56} color={COLOR.inkMute} /><Text style={styles.emptyTxt}>Sin usuarios</Text></View>} />
+              {/* Usuario (solo desktop) */}
+              {isDesktop && <Text style={[styles.cell, styles.cellUser, styles.metaText]}>@{user.username}</Text>}
 
-      {/* Modal nuevo usuario */}
-      <UserFormModal visible={modalOpen} stores={stores} onClose={() => setModalOpen(false)} onSubmit={(d) => { onCreate(d); setModalOpen(false); }} />
+              {/* Local (solo desktop) */}
+              {isDesktop && <Text style={[styles.cell, styles.cellStore, styles.metaText]}>{user.storeName}</Text>}
 
-      {/* Bottom sheet de acciones */}
-      <Modal transparent visible={!!ctx} animationType="slide" onRequestClose={() => setCtx(null)}>
-        <View style={styles.sheetOv}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setCtx(null)} />
-          <View style={styles.sheet}>
-            <View style={styles.handle} />
-            <CtxRow icon="pencil" color={COLOR.info} label="Editar usuario" onPress={() => { if (ctx) onEdit(ctx.id); setCtx(null); }} />
-            <CtxRow icon="lock-reset" color={COLOR.warn} label="Resetear contraseña" onPress={() => { if (ctx) onResetPassword(ctx.id); setCtx(null); }} />
-            <CtxRow icon={ctx?.estado === 'activo' ? 'account-off' : 'account-check'} color={COLOR.warn} label={ctx?.estado === 'activo' ? 'Suspender' : 'Activar'} onPress={() => { if (ctx) onToggleSuspend(ctx.id); setCtx(null); }} />
-            {isRoot && <CtxRow icon="trash-can" color={COLOR.expense} label="Eliminar permanentemente" onPress={() => { if (ctx) onDelete(ctx.id); setCtx(null); }} />}
+              {/* Estado */}
+              <View style={[styles.cell, styles.cellStatus]}>
+                <View style={[styles.statusBadge, { backgroundColor: statusColor(user.status) + '18', borderColor: statusColor(user.status) + '44' }]}>
+                  <Text style={[styles.statusText, { color: statusColor(user.status) }]}>
+                    {statusLabel(user.status)}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Acciones */}
+              <View style={[styles.cell, styles.cellActions]}>
+                {user.status === 'ACTIVE'
+                  ? <IconButton icon="pause-circle" size={20} iconColor={COLOR.warn} onPress={() => handleSuspend(user)} style={{ margin: 0 }} />
+                  : <IconButton icon="play-circle" size={20} iconColor={COLOR.income} onPress={() => handleActivate(user)} style={{ margin: 0 }} />
+                }
+                <IconButton icon="store-edit" size={20} iconColor={COLOR.info} onPress={() => { setReassignModal(user); setReassignStoreId(String(user.storeId)); }} style={{ margin: 0 }} />
+                <IconButton icon="lock-reset" size={20} iconColor={COLOR.ink2} onPress={() => { setResetModal(user); setNewPassword(''); }} style={{ margin: 0 }} />
+                <IconButton icon="delete" size={20} iconColor={COLOR.expense} onPress={() => handleDelete(user)} style={{ margin: 0 }} />
+              </View>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+
+      {/* ── Modal crear usuario ── */}
+      <Modal visible={createModal} transparent animationType="fade" onRequestClose={() => setCreateModal(false)}>
+        <View style={styles.overlay}>
+          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+            <View style={[styles.modal, { width: '100%', maxWidth: 440 }]}>
+              <Text style={styles.modalTitle}>Nuevo usuario</Text>
+
+              <TextInput label="Nombre completo *" value={form.fullName} onChangeText={v => setForm({ ...form, fullName: v })} mode="outlined" style={styles.input} />
+              <TextInput label="Username *" value={form.username} onChangeText={v => setForm({ ...form, username: v.toLowerCase().replace(/\s+/g, '.') })} mode="outlined" style={styles.input} autoCapitalize="none" />
+              <TextInput
+                label="Contraseña *" value={form.password}
+                onChangeText={v => setForm({ ...form, password: v })}
+                mode="outlined" style={styles.input}
+                secureTextEntry={!showPassword}
+                right={<TextInput.Icon icon={showPassword ? 'eye-off' : 'eye'} onPress={() => setShowPassword(v => !v)} />}
+              />
+
+              {/* Selector de local */}
+              <Text style={styles.fieldLabel}>Local *</Text>
+              <View style={styles.storeSelector}>
+                {stores.map(s => (
+                  <TouchableOpacity
+                    key={s.id}
+                    style={[styles.storeChip, form.storeId === String(s.id) && styles.storeChipActive]}
+                    onPress={() => setForm({ ...form, storeId: String(s.id) })}
+                  >
+                    <Text style={[styles.storeChipText, form.storeId === String(s.id) && styles.storeChipTextActive]}>
+                      {s.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Selector de rol — solo root puede asignar admin */}
+              {isRoot ? (
+                <View style={{ marginBottom: SPACE.s2 }}>
+                  <Text style={styles.fieldLabel}>Rol *</Text>
+                  <View style={styles.storeSelector}>
+                    {(['user', 'admin'] as const).map(r => (
+                      <TouchableOpacity
+                        key={r}
+                        style={[styles.storeChip, form.role === r && styles.storeChipActive]}
+                        onPress={() => setForm({ ...form, role: r })}
+                      >
+                        <Text style={[styles.storeChipText, form.role === r && styles.storeChipTextActive]}>
+                          {r === 'user' ? 'Cajero (user)' : 'Gerente (admin)'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              ) : (
+                <Text style={styles.roleNote}>El usuario recibirá el rol <Text style={{ fontWeight: '900' }}>user</Text> automáticamente.</Text>
+              )}
+
+              <View style={styles.modalActions}>
+                <Button mode="outlined" onPress={() => { setCreateModal(false); setForm(EMPTY_FORM); }} style={{ flex: 1 }}>Cancelar</Button>
+                <Button mode="contained" onPress={handleCreate} loading={saving} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Crear usuario</Button>
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* ── Modal reasignar local ── */}
+      <Modal visible={!!reassignModal} transparent animationType="fade" onRequestClose={() => setReassignModal(null)}>
+        <View style={styles.overlay}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>Reasignar local</Text>
+            <Text style={styles.modalSub}>{reassignModal?.fullName}</Text>
+            <Text style={styles.fieldLabel}>Seleccioná el nuevo local:</Text>
+            <View style={styles.storeSelector}>
+              {stores.map(s => (
+                <TouchableOpacity
+                  key={s.id}
+                  style={[styles.storeChip, reassignStoreId === String(s.id) && styles.storeChipActive]}
+                  onPress={() => setReassignStoreId(String(s.id))}
+                >
+                  <Text style={[styles.storeChipText, reassignStoreId === String(s.id) && styles.storeChipTextActive]}>
+                    {s.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.modalActions}>
+              <Button mode="outlined" onPress={() => setReassignModal(null)} style={{ flex: 1 }}>Cancelar</Button>
+              <Button mode="contained" onPress={handleReassign} loading={reassigning} buttonColor={COLOR.info} textColor={COLOR.white} style={{ flex: 1 }}>Reasignar</Button>
+            </View>
           </View>
         </View>
       </Modal>
+
+      {/* ── Modal reset password ── */}
+      <Modal visible={!!resetModal} transparent animationType="fade" onRequestClose={() => setResetModal(null)}>
+        <View style={styles.overlay}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>Cambiar contraseña</Text>
+            <Text style={styles.modalSub}>{resetModal?.fullName} (@{resetModal?.username})</Text>
+            <TextInput
+              label="Nueva contraseña *" value={newPassword}
+              onChangeText={setNewPassword}
+              mode="outlined" style={[styles.input, { marginTop: 12 }]}
+              secureTextEntry={!showNewPwd}
+              right={<TextInput.Icon icon={showNewPwd ? 'eye-off' : 'eye'} onPress={() => setShowNewPwd(v => !v)} />}
+            />
+            <View style={styles.modalActions}>
+              <Button mode="outlined" onPress={() => setResetModal(null)} style={{ flex: 1 }}>Cancelar</Button>
+              <Button mode="contained" onPress={handleResetPassword} loading={resetting} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Guardar</Button>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <ConfirmDialog
+        visible={!!confirmDlg}
+        title={confirmDlg?.title ?? ''}
+        message={confirmDlg?.message ?? ''}
+        confirmLabel="Sí, confirmar"
+        onConfirm={() => confirmDlg?.onConfirm()}
+        onCancel={() => setConfirmDlg(null)}
+      />
+      <Snackbar visible={!!snackbar} onDismiss={() => setSnackbar('')} duration={3000}>{snackbar}</Snackbar>
     </View>
   );
 }
 
-function RoleBadge({ role }: { role: Role }) {
-  const boxStyle = role === 'root' ? styles.bRoot : role === 'admin' ? styles.bAdmin : styles.bUser;
-  const txtStyle = role === 'root' ? styles.bRootTxt : role === 'admin' ? styles.bAdminTxt : styles.bUserTxt;
-  return <View style={[styles.roleBadge, boxStyle]}><Text style={[styles.roleTxt, txtStyle]}>{ROLE_LABEL[role]}</Text></View>;
-}
-function CtxRow({ icon, color, label, onPress }: { icon: string; color: string; label: string; onPress: () => void }) {
-  return (
-    <TouchableOpacity style={styles.ctxRow} onPress={onPress}>
-      <MaterialCommunityIcons name={icon} size={20} color={color} />
-      <Text style={[styles.ctxTxt, color === COLOR.expense && { color: COLOR.expense }]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function UserFormModal({ visible, stores, onClose, onSubmit }: { visible: boolean; stores: string[]; onClose: () => void; onSubmit: (d: any) => void; }) {
-  const [nombre, setNombre] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [rol, setRol] = useState<'admin' | 'user'>('user');
-  const [local, setLocal] = useState(stores[0] ?? '');
-  const valid = nombre && username && password;
-  return (
-    <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalOv}>
-        <View style={styles.modal}>
-          <Text style={styles.modalTitle}>Nuevo usuario</Text>
-          <Field label="Nombre completo"><TextInput style={styles.input} value={nombre} onChangeText={setNombre} placeholder="Ej: Ana Rodríguez" placeholderTextColor={COLOR.inkDisabled} /></Field>
-          <Field label="Usuario"><TextInput style={styles.input} value={username} onChangeText={setUsername} autoCapitalize="none" placeholder="ana.rodriguez" placeholderTextColor={COLOR.inkDisabled} /></Field>
-          <Field label="Contraseña"><TextInput style={styles.input} value={password} onChangeText={setPassword} secureTextEntry placeholder="••••••••" placeholderTextColor={COLOR.inkDisabled} /></Field>
-          <Field label="Rol">
-            <View style={styles.seg}>
-              <TouchableOpacity style={[styles.segBtn, rol === 'user' && styles.segOn]} onPress={() => setRol('user')}><Text style={[styles.segTxt, rol === 'user' && styles.segTxtOn]}>Cajero</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.segBtn, rol === 'admin' && styles.segOn]} onPress={() => setRol('admin')}><Text style={[styles.segTxt, rol === 'admin' && styles.segTxtOn]}>Admin</Text></TouchableOpacity>
-            </View>
-          </Field>
-          <Field label="Local asignado">
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.localChips}>
-              {stores.map(s => (
-                <TouchableOpacity key={s} style={[styles.localChip, local === s && styles.localChipOn]} onPress={() => setLocal(s)}>
-                  <Text style={[styles.localChipTxt, local === s && styles.localChipTxtOn]}>{s}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </Field>
-          <View style={styles.fActions}>
-            <TouchableOpacity style={styles.fCancel} onPress={onClose}><Text style={styles.fCancelTxt}>Cancelar</Text></TouchableOpacity>
-            <TouchableOpacity style={[styles.fSave, !valid && styles.fSaveDis]} disabled={!valid} onPress={() => onSubmit({ nombre, username, password, rol, local })}><Text style={styles.fSaveTxt}>Crear usuario</Text></TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <View style={styles.field}><Text style={styles.fLabel}>{label}</Text>{children}</View>;
-}
+// ─── Estilos ─────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLOR.bg }, flex: { flex: 1 },
-  appbar: { height: 56, flexDirection: 'row', alignItems: 'center', gap: SPACE.s2, paddingHorizontal: SPACE.s3, backgroundColor: COLOR.surface, borderBottomWidth: 1, borderBottomColor: COLOR.border },
-  back: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  title: { flex: 1, fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold, color: COLOR.ink },
-  newBtn: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s1, height: CONTROL.buttonSmH, paddingHorizontal: SPACE.s3, borderRadius: RADIUS.r2, backgroundColor: COLOR.brand },
-  newTxt: { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.bold, color: COLOR.inkOnBrand },
+  root:           { flex: 1, backgroundColor: COLOR.bg },
 
-  search: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s2, marginHorizontal: SPACE.s4, marginTop: SPACE.s3, height: 44, borderWidth: 1, borderColor: COLOR.border2, borderRadius: RADIUS.r2, backgroundColor: COLOR.surface, paddingHorizontal: SPACE.s3 },
-  searchInput: { flex: 1, fontSize: FONT_SIZE.body, color: COLOR.ink },
-  chips: { gap: SPACE.s2, paddingHorizontal: SPACE.s4, paddingVertical: SPACE.s3 },
-  chip: { height: CONTROL.chipH, paddingHorizontal: SPACE.s4, borderRadius: RADIUS.full, borderWidth: 1, borderColor: COLOR.border, backgroundColor: COLOR.surface, justifyContent: 'center' },
-  chipOn: { backgroundColor: COLOR.brand, borderColor: COLOR.brand },
-  chipTxt: { fontSize: FONT_SIZE.label, color: COLOR.ink2 }, chipTxtOn: { color: COLOR.inkOnBrand, fontWeight: FONT_WEIGHT.semibold },
+  header:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: SPACE.s2, padding: SPACE.s4, backgroundColor: COLOR.surface, borderBottomWidth: 1, borderBottomColor: COLOR.border },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s2 },
+  headerTitle:    { fontSize: FONT_SIZE.h1, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
 
-  row: { flexDirection: 'row', alignItems: 'flex-start', gap: SPACE.s3, padding: SPACE.s4, backgroundColor: COLOR.surface, borderBottomWidth: 1, borderBottomColor: COLOR.border },
-  avatar: { width: 44, height: 44, borderRadius: RADIUS.full, backgroundColor: COLOR.brandTint, justifyContent: 'center', alignItems: 'center' },
-  avatarTxt: { fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold, color: COLOR.brandDeep },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s2, flexWrap: 'wrap' },
-  name: { fontSize: FONT_SIZE.body, fontWeight: FONT_WEIGHT.semibold, color: COLOR.ink },
-  username: { fontSize: FONT_SIZE.caption, color: COLOR.inkMute, marginTop: 2 },
-  storeRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s1, marginTop: 2 },
-  storeTxt: { fontSize: FONT_SIZE.caption, color: COLOR.inkMute },
-  dots: { padding: 4 },
+  empty:          { flex: 1, justifyContent: 'center', alignItems: 'center', gap: SPACE.s2, padding: SPACE.s8 },
+  emptyText:      { fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
+  emptySub:       { fontSize: FONT_SIZE.label, color: COLOR.inkMute },
 
-  roleBadge: { paddingHorizontal: SPACE.s2, paddingVertical: 1, borderRadius: RADIUS.full, borderWidth: 1 },
-  roleTxt: { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.medium },
-  bRoot: { backgroundColor: COLOR.expenseTint, borderColor: COLOR.expense }, bRootTxt: { color: COLOR.expense },
-  bAdmin: { backgroundColor: COLOR.infoTint, borderColor: COLOR.info }, bAdminTxt: { color: COLOR.info },
-  bUser: { backgroundColor: COLOR.brandTint, borderColor: COLOR.brand }, bUserTxt: { color: COLOR.brandDeep },
-  stSusp: { backgroundColor: COLOR.surface2, paddingHorizontal: SPACE.s2, paddingVertical: 1, borderRadius: RADIUS.full },
-  stSuspTxt: { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.semibold, color: COLOR.inkMute },
+  rowHeader:      { backgroundColor: COLOR.surface2, borderBottomWidth: 2, borderBottomColor: COLOR.border },
+  row:            { flexDirection: 'row', alignItems: 'center', backgroundColor: COLOR.surface, borderBottomWidth: 1, borderBottomColor: COLOR.border, paddingHorizontal: SPACE.s1, minHeight: 56 },
+  rowSuspended:   { opacity: 0.6, backgroundColor: COLOR.bgAlt },
+  cell:           { paddingHorizontal: SPACE.s2, paddingVertical: SPACE.s2 },
+  cellName:       { flex: 1 },
+  cellUser:       { width: 140 },
+  cellStore:      { width: 110 },
+  cellStatus:     { width: 110 },
+  cellActions:    { flexDirection: 'row', alignItems: 'center', width: 160 },
+  colHeader:      { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.inkMute } as any,
 
-  empty: { paddingVertical: SPACE.s8, alignItems: 'center' },
-  emptyTxt: { fontSize: FONT_SIZE.h3, color: COLOR.inkMute, marginTop: SPACE.s3 },
+  userName:       { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
+  userMeta:       { fontSize: FONT_SIZE.caption, color: COLOR.inkMute, fontWeight: FONT_WEIGHT.medium as any, marginTop: 2 },
+  metaText:       { fontSize: FONT_SIZE.label, color: COLOR.ink2, fontWeight: FONT_WEIGHT.medium as any },
 
-  sheetOv: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'COLOR.overlay' },
-  sheet: { backgroundColor: COLOR.surface, borderTopLeftRadius: RADIUS.r4, borderTopRightRadius: RADIUS.r4, paddingBottom: SPACE.s5 },
-  handle: { width: 40, height: 4, borderRadius: RADIUS.full, backgroundColor: COLOR.border2, alignSelf: 'center', marginTop: SPACE.s3, marginBottom: SPACE.s3 },
-  ctxRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s4, paddingVertical: SPACE.s4, paddingHorizontal: SPACE.s4, borderBottomWidth: 1, borderBottomColor: COLOR.border },
-  ctxTxt: { fontSize: FONT_SIZE.body, fontWeight: FONT_WEIGHT.medium, color: COLOR.ink },
+  statusBadge:    { borderRadius: RADIUS.r1, paddingHorizontal: SPACE.s2, paddingVertical: 4, borderWidth: 1, alignSelf: 'flex-start' },
+  statusText:     { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any },
 
-  modalOv: { flex: 1, justifyContent: 'center', backgroundColor: 'COLOR.overlay', padding: SPACE.s4 },
-  modal: { backgroundColor: COLOR.surface, borderRadius: RADIUS.r4, padding: SPACE.s5, ...SHADOW.lg },
-  modalTitle: { fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold, color: COLOR.ink, marginBottom: SPACE.s4 },
-  field: { marginBottom: SPACE.s3 },
-  fLabel: { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.medium, color: COLOR.ink2, marginBottom: SPACE.s1 },
-  input: { height: CONTROL.inputH, borderWidth: 1, borderColor: COLOR.border2, borderRadius: RADIUS.r2, paddingHorizontal: SPACE.s3, fontSize: FONT_SIZE.body, color: COLOR.ink, backgroundColor: COLOR.surface },
-  seg: { flexDirection: 'row', gap: SPACE.s2 },
-  segBtn: { flex: 1, height: 44, borderRadius: RADIUS.r2, borderWidth: 1, borderColor: COLOR.border2, backgroundColor: COLOR.surface, justifyContent: 'center', alignItems: 'center' },
-  segOn: { backgroundColor: COLOR.brandTint, borderColor: COLOR.brand },
-  segTxt: { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.semibold, color: COLOR.ink2 }, segTxtOn: { color: COLOR.brandDeep },
-  localChips: { gap: SPACE.s2 },
-  localChip: { height: CONTROL.chipH, paddingHorizontal: SPACE.s3, borderRadius: RADIUS.full, borderWidth: 1, borderColor: COLOR.border, backgroundColor: COLOR.surface, justifyContent: 'center' },
-  localChipOn: { backgroundColor: COLOR.brand, borderColor: COLOR.brand },
-  localChipTxt: { fontSize: FONT_SIZE.label, color: COLOR.ink2 }, localChipTxtOn: { color: COLOR.inkOnBrand, fontWeight: FONT_WEIGHT.semibold },
-  fActions: { flexDirection: 'row', gap: SPACE.s2, marginTop: SPACE.s5 },
-  fCancel: { flex: 1, height: CONTROL.buttonH, borderRadius: RADIUS.r2, borderWidth: 1, borderColor: COLOR.border2, backgroundColor: COLOR.surface, justifyContent: 'center', alignItems: 'center' },
-  fCancelTxt: { fontSize: FONT_SIZE.body, fontWeight: FONT_WEIGHT.bold, color: COLOR.ink2 },
-  fSave: { flex: 1, height: CONTROL.buttonH, borderRadius: RADIUS.r2, backgroundColor: COLOR.brand, justifyContent: 'center', alignItems: 'center' },
-  fSaveDis: { opacity: 0.5 },
-  fSaveTxt: { fontSize: FONT_SIZE.body, fontWeight: FONT_WEIGHT.bold, color: COLOR.inkOnBrand },
+  overlay:        { flex: 1, backgroundColor: COLOR.overlay, justifyContent: 'center', alignItems: 'center' },
+  modal:          { backgroundColor: COLOR.surface, borderRadius: RADIUS.r4, padding: SPACE.s5, width: '92%', maxWidth: 440, gap: SPACE.s1 },
+  modalTitle:     { fontSize: FONT_SIZE.h1, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, marginBottom: SPACE.s1 },
+  modalSub:       { fontSize: FONT_SIZE.label, color: COLOR.ink2, fontWeight: FONT_WEIGHT.semibold as any, marginBottom: SPACE.s2 },
+  modalActions:   { flexDirection: 'row', gap: SPACE.s2, marginTop: SPACE.s3 },
+  input:          { marginBottom: SPACE.s2 },
+  fieldLabel:     { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.inkMute, marginBottom: SPACE.s2, marginTop: SPACE.s1 },
+
+  storeSelector:  { flexDirection: 'row', flexWrap: 'wrap', gap: SPACE.s2, marginBottom: SPACE.s3 },
+  storeChip:      { paddingHorizontal: SPACE.s4, paddingVertical: SPACE.s2, borderRadius: RADIUS.full, backgroundColor: COLOR.bg, borderWidth: 1, borderColor: COLOR.border },
+  storeChipActive:{ backgroundColor: COLOR.brand, borderColor: COLOR.brandDark },
+  storeChipText:  { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.semibold as any, color: COLOR.ink2 },
+  storeChipTextActive: { color: COLOR.ink, fontWeight: FONT_WEIGHT.bold as any },
+
+  roleNote:       { fontSize: FONT_SIZE.caption, color: COLOR.inkMute, backgroundColor: COLOR.bgAlt, borderRadius: RADIUS.r2, padding: SPACE.s2, marginBottom: SPACE.s1 },
 });
-
-// ─── Connected wrapper ────────────────────────────────────────────────────────
-export default function UsersScreen() {
-  const { roles } = useAuth();
-  const { stores: storeList } = useStore();
-  const isRoot = roles.includes('root');
-  const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchUsers = async () => {
-    try {
-      const { data } = await axios.get(`${REACT_APP_API_URL}/api/v2/users`);
-      setUsers((data ?? []).map((u: any) => ({
-        id: String(u.id ?? u.keycloakId),
-        nombre: u.fullName ?? u.nombre ?? u.username,
-        username: u.username,
-        rol: u.role ?? u.rol ?? 'user',
-        estado: u.active === false ? 'suspendido' : 'activo',
-        local: u.storeName ?? storeList.find(s => s.id === u.storeId)?.name ?? '—',
-      })));
-    } catch (e) { console.error('[UsersScreen]', e); }
-    finally { setLoading(false); }
-  };
-
-  useEffect(() => { fetchUsers(); }, []);
-
-  if (loading) return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLOR.bg }}><ActivityIndicator size="large" color={COLOR.brand} /></View>;
-
-  return (
-    <UsersView
-      users={users} isRoot={isRoot}
-      stores={storeList.map(s => s.name)}
-      onBack={() => {}}
-      onCreate={async (d) => { await axios.post(`${REACT_APP_API_URL}/api/v2/users`, d); fetchUsers(); }}
-      onEdit={() => {}}
-      onResetPassword={async (id) => { await axios.put(`${REACT_APP_API_URL}/api/v2/users/${id}/reset-password`); }}
-      onToggleSuspend={async (id) => { await axios.put(`${REACT_APP_API_URL}/api/v2/users/${id}/toggle`); fetchUsers(); }}
-      onDelete={async (id) => { await axios.delete(`${REACT_APP_API_URL}/api/v2/users/${id}`); fetchUsers(); }}
-    />
-  );
-}
