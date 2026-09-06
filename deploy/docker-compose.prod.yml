@@ -1,0 +1,7 @@
+services:
+  belopia-frontend-prod:
+    image: adrianpuche/belopia-frontend:latest
+    container_name: belopia-frontend-prod
+    restart: unless-stopped
+    ports:
+      - "8112:80"
