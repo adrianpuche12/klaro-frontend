@@ -14,17 +14,43 @@ import DynamicFormScreen from './DynamicFormScreen';
 
 type UserScreen = 'sales' | 'inventory' | 'salesHistory' | 'operaciones';
 
-const MENU: { key: UserScreen; label: string; icon: string }[] = [
-  { key: 'sales',        label: 'Ventas',           icon: 'cart-outline' },
-  { key: 'inventory',    label: 'Inventario',        icon: 'package-variant' },
-  { key: 'salesHistory', label: 'Mis ventas',        icon: 'receipt-text-outline' },
-  { key: 'operaciones',  label: 'Operaciones',       icon: 'clipboard-text-outline' },
+// Mapea cada item de menú al módulo de permisos que lo habilita (SPRINT-09).
+// Mismo catálogo que PermissionModule en el backend / MODULES en UsersScreen.
+const MENU: { key: UserScreen; label: string; icon: string; module: string }[] = [
+  { key: 'sales',        label: 'Ventas',      icon: 'cart-outline',              module: 'POS' },
+  { key: 'inventory',    label: 'Inventario',  icon: 'package-variant',           module: 'INVENTORY' },
+  { key: 'salesHistory', label: 'Mis ventas',  icon: 'receipt-text-outline',      module: 'SALES_HISTORY' },
+  { key: 'operaciones',  label: 'Operaciones', icon: 'clipboard-text-outline',    module: 'OPERATIONS' },
 ];
+
+/**
+ * Filtra el menú según los permisos del usuario. Espeja la excepción legacy
+ * de PermissionGuard en el backend: sin businessRole ni ninguna fila de perfil
+ * acotado (permissions/accessibleStoreIds vacíos) = cuenta creada antes de
+ * SPRINT-09 = acceso total, mismo comportamiento de siempre. Con perfil acotado,
+ * "permissions vacío" significa CERO módulos, no todos.
+ */
+interface UserProfile {
+  storeId?: number | null;
+  businessRole?: string | null;
+  permissions?: string[];
+  accessibleStoreIds?: number[];
+}
+
+function visibleMenuFor(profile: UserProfile | null): typeof MENU {
+  if (!profile) return MENU;
+  const isLegacy = !profile.businessRole
+    && (!profile.permissions || profile.permissions.length === 0)
+    && (!profile.accessibleStoreIds || profile.accessibleStoreIds.length === 0);
+  if (isLegacy) return MENU;
+  const perms = profile.permissions ?? [];
+  return MENU.filter(item => perms.includes(item.module));
+}
 
 // ─── Sidebar del usuario ──────────────────────────────────────────────────────
 
-const UserSidebar = ({ active, onSelect, onClose, isDesktop }: {
-  active: UserScreen; onSelect: (s: UserScreen) => void;
+const UserSidebar = ({ menu, active, onSelect, onClose, isDesktop }: {
+  menu: typeof MENU; active: UserScreen | null; onSelect: (s: UserScreen) => void;
   onClose: () => void; isDesktop: boolean;
 }) => {
   const { logout, userName } = useAuth();
@@ -41,7 +67,12 @@ const UserSidebar = ({ active, onSelect, onClose, isDesktop }: {
       </View>
 
       <View style={styles.menuScroll}>
-        {MENU.map(item => (
+        {menu.length === 0 && (
+          <Text style={{ paddingHorizontal: SPACE.s4, fontSize: FONT_SIZE.caption, color: COLOR.inkMute }}>
+            Sin módulos asignados todavía.
+          </Text>
+        )}
+        {menu.map(item => (
           <TouchableOpacity
             key={item.key}
             style={[styles.menuItem, active === item.key && styles.menuItemActive]}
@@ -76,46 +107,51 @@ const UserContent = () => {
   const { userName } = useAuth();
   const { stores, setSelectedStore, loadingStores } = useStore();
 
-  const [active, setActive]         = useState<UserScreen>('sales');
+  const [profile, setProfile]       = useState<UserProfile | null>(null);
+  const [active, setActive]         = useState<UserScreen | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [ready, setReady]           = useState(false);
 
+  // El perfil (permisos, businessRole, local principal) se resuelve una sola
+  // vez por sesión, independiente de si el tenant tiene locales o no —
+  // antes esto estaba encadenado a "esperar locales", lo que ocultaba la
+  // navbar entera cuando stores.length === 0 (ver incidente 07-Sep-2026).
   useEffect(() => {
-    if (loadingStores) return;
-    if (stores.length === 0 || !userName) {
-      if (stores[0]) setSelectedStore(stores[0]);
-      setReady(true);
-      return;
-    }
+    if (!userName) { setReady(true); return; }
     axios.get(`${REACT_APP_API_URL}/api/v2/users/by-username/${userName}`)
-      .then(res => {
-        const store = stores.find(s => s.id === res.data.storeId);
-        if (store) setSelectedStore(store);
-        else if (stores[0]) setSelectedStore(stores[0]);
-      })
-      .catch(() => { if (stores[0]) setSelectedStore(stores[0]); })
+      .then(res => setProfile(res.data))
+      .catch(() => {})
       .finally(() => setReady(true));
-  }, [userName, stores, loadingStores]);
+  }, [userName]);
 
-  const screenTitle = MENU.find(m => m.key === active)?.label ?? '';
+  // Selección de local principal — depende de que los locales del tenant
+  // hayan cargado, pero ya no bloquea el resto de la pantalla.
+  useEffect(() => {
+    if (loadingStores || !profile) return;
+    const store = stores.find(s => s.id === profile.storeId) ?? stores[0];
+    if (store) setSelectedStore(store);
+  }, [profile, stores, loadingStores]);
 
-  if (!ready) return <ActivityIndicator size="large" color={COLOR.brand} style={{ flex: 1, marginTop: 60 }} />;
+  const visibleMenu = visibleMenuFor(profile);
 
-  if (stores.length === 0) return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
-      <Text style={{ fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, textAlign: 'center' }}>
-        Sin locales asignados
-      </Text>
-      <Text style={{ fontSize: FONT_SIZE.body, color: COLOR.inkMute, textAlign: 'center', marginTop: 8 }}>
-        Pedí al administrador que te asigne un local.
-      </Text>
-    </View>
-  );
+  // Una vez conocido el menú visible, activar el primer item si todavía no hay ninguno.
+  useEffect(() => {
+    if (active === null && visibleMenu.length > 0) setActive(visibleMenu[0].key);
+  }, [active, visibleMenu]);
+
+  const screenTitle = visibleMenu.find(m => m.key === active)?.label ?? 'Belopia';
+  const noStores = !loadingStores && stores.length === 0;
+
+  // Si el fetch del perfil falla (red, 404), profile queda null -> visibleMenuFor
+  // trata null como legacy (menú completo) para no dejar al usuario sin nada.
+  if (!ready) {
+    return <ActivityIndicator size="large" color={COLOR.brand} style={{ flex: 1, marginTop: 60 }} />;
+  }
 
   return (
     <View style={styles.container}>
       {isDesktop && (
-        <UserSidebar active={active} onSelect={setActive} onClose={() => {}} isDesktop />
+        <UserSidebar menu={visibleMenu} active={active} onSelect={setActive} onClose={() => {}} isDesktop />
       )}
 
       <View style={styles.content}>
@@ -133,16 +169,38 @@ const UserContent = () => {
           </View>
         )}
 
-        {active === 'sales'        && <POSScreen hideStoreSelector />}
-        {active === 'inventory'    && <InventoryScreen />}
-        {active === 'salesHistory' && <SalesHistoryScreen />}
-        {active === 'operaciones'  && <DynamicFormScreen />}
+        {visibleMenu.length === 0 ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+            <Text style={{ fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, textAlign: 'center' }}>
+              Sin módulos asignados
+            </Text>
+            <Text style={{ fontSize: FONT_SIZE.body, color: COLOR.inkMute, textAlign: 'center', marginTop: 8 }}>
+              Pedí al administrador que te asigne acceso a algún módulo.
+            </Text>
+          </View>
+        ) : noStores ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+            <Text style={{ fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, textAlign: 'center' }}>
+              Sin locales asignados
+            </Text>
+            <Text style={{ fontSize: FONT_SIZE.body, color: COLOR.inkMute, textAlign: 'center', marginTop: 8 }}>
+              Pedí al administrador que te asigne un local.
+            </Text>
+          </View>
+        ) : (
+          <>
+            {active === 'sales'        && <POSScreen hideStoreSelector />}
+            {active === 'inventory'    && <InventoryScreen />}
+            {active === 'salesHistory' && <SalesHistoryScreen />}
+            {active === 'operaciones'  && <DynamicFormScreen />}
+          </>
+        )}
       </View>
 
       {!isDesktop && (
         <Modal visible={drawerOpen} transparent animationType="slide" onRequestClose={() => setDrawerOpen(false)}>
           <View style={styles.drawerOverlay}>
-            <UserSidebar active={active} onSelect={setActive} onClose={() => setDrawerOpen(false)} isDesktop={false} />
+            <UserSidebar menu={visibleMenu} active={active} onSelect={setActive} onClose={() => setDrawerOpen(false)} isDesktop={false} />
             <TouchableOpacity style={styles.drawerBg} onPress={() => setDrawerOpen(false)} />
           </View>
         </Modal>
