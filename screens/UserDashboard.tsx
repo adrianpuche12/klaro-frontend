@@ -7,6 +7,7 @@ import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { REACT_APP_API_URL } from '../config';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, BREAKPOINT } from '../theme';
+import AppText from '../components/ui/AppText';
 import POSScreen from './POSScreen';
 import InventoryScreen from './InventoryScreen';
 import SalesHistoryScreen from './SalesHistoryScreen';
@@ -68,9 +69,9 @@ const UserSidebar = ({ menu, active, onSelect, onClose, isDesktop }: {
 
       <View style={styles.menuScroll}>
         {menu.length === 0 && (
-          <Text style={{ paddingHorizontal: SPACE.s4, fontSize: FONT_SIZE.caption, color: COLOR.inkMute }}>
+          <AppText variant="caption" style={{ paddingHorizontal: SPACE.s4 }}>
             Sin módulos asignados todavía.
-          </Text>
+          </AppText>
         )}
         {menu.map(item => (
           <TouchableOpacity
@@ -107,10 +108,10 @@ const UserContent = () => {
   const { userName } = useAuth();
   const { stores, setSelectedStore, loadingStores } = useStore();
 
-  const [profile, setProfile]       = useState<UserProfile | null>(null);
-  const [active, setActive]         = useState<UserScreen | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [ready, setReady]           = useState(false);
+  const [profile, setProfile]         = useState<UserProfile | null>(null);
+  const [explicitActive, setExplicitActive] = useState<UserScreen | null>(null);
+  const [drawerOpen, setDrawerOpen]   = useState(false);
+  const [ready, setReady]             = useState(false);
 
   // El perfil (permisos, businessRole, local principal) se resuelve una sola
   // vez por sesión, independiente de si el tenant tiene locales o no —
@@ -134,10 +135,12 @@ const UserContent = () => {
 
   const visibleMenu = visibleMenuFor(profile);
 
-  // Una vez conocido el menú visible, activar el primer item si todavía no hay ninguno.
-  useEffect(() => {
-    if (active === null && visibleMenu.length > 0) setActive(visibleMenu[0].key);
-  }, [active, visibleMenu]);
+  // Derivado durante el render, sin Effect ni estado extra (ver "05. Estandares
+  // de Codigo Frontend" en el vault — "no uses un Effect cuando podés calcular
+  // durante el render"). explicitActive gana si el usuario ya clickeó un item;
+  // si no, el primero del menú visible.
+  const active = explicitActive ?? visibleMenu[0]?.key ?? null;
+  const setActive = setExplicitActive;
 
   const screenTitle = visibleMenu.find(m => m.key === active)?.label ?? 'Belopia';
   const noStores = !loadingStores && stores.length === 0;
@@ -170,22 +173,18 @@ const UserContent = () => {
         )}
 
         {visibleMenu.length === 0 ? (
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
-            <Text style={{ fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, textAlign: 'center' }}>
-              Sin módulos asignados
-            </Text>
-            <Text style={{ fontSize: FONT_SIZE.body, color: COLOR.inkMute, textAlign: 'center', marginTop: 8 }}>
+          <View style={styles.emptyState}>
+            <AppText variant="title" centered>Sin módulos asignados</AppText>
+            <AppText variant="description" centered style={{ marginTop: 8 }}>
               Pedí al administrador que te asigne acceso a algún módulo.
-            </Text>
+            </AppText>
           </View>
         ) : noStores ? (
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
-            <Text style={{ fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, textAlign: 'center' }}>
-              Sin locales asignados
-            </Text>
-            <Text style={{ fontSize: FONT_SIZE.body, color: COLOR.inkMute, textAlign: 'center', marginTop: 8 }}>
+          <View style={styles.emptyState}>
+            <AppText variant="title" centered>Sin locales asignados</AppText>
+            <AppText variant="description" centered style={{ marginTop: 8 }}>
               Pedí al administrador que te asigne un local.
-            </Text>
+            </AppText>
           </View>
         ) : (
           <>
@@ -242,4 +241,6 @@ const styles = StyleSheet.create({
 
   drawerOverlay:   { flex: 1, flexDirection: 'row' },
   drawerBg:        { flex: 1, backgroundColor: COLOR.overlay },
+
+  emptyState:      { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
 });

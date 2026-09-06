@@ -9,6 +9,7 @@ import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
 import { useAuth } from '../context/AuthContext';
 import ConfirmDialog from '../components/ConfirmDialog';
+import AppText from '../components/ui/AppText';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, BREAKPOINT } from '../theme';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -258,7 +259,7 @@ export default function UsersScreen() {
       <View style={styles.header}>
         <View style={styles.headerTitleRow}>
           <MaterialCommunityIcons name="account-multiple-outline" size={22} color={COLOR.ink} />
-          <Text style={styles.headerTitle}>Usuarios</Text>
+          <AppText variant="title">Usuarios</AppText>
         </View>
         <Button mode="contained" onPress={() => setCreateModal(true)} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ borderRadius: 10 }}>
           + Nuevo usuario
@@ -271,8 +272,8 @@ export default function UsersScreen() {
       ) : users.length === 0 ? (
         <View style={styles.empty}>
           <MaterialCommunityIcons name="account-outline" size={48} color={COLOR.inkDisabled} />
-          <Text style={styles.emptyText}>No hay usuarios creados aún.</Text>
-          <Text style={styles.emptySub}>Creá el primer usuario con el botón de arriba.</Text>
+          <AppText variant="title">No hay usuarios creados aún.</AppText>
+          <AppText variant="description">Creá el primer usuario con el botón de arriba.</AppText>
         </View>
       ) : (
         <ScrollView>
@@ -331,7 +332,7 @@ export default function UsersScreen() {
         <View style={styles.overlay}>
           <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 16 }}>
             <View style={[styles.modal, { width: '100%', maxWidth: 440 }]}>
-              <Text style={styles.modalTitle}>Nuevo usuario</Text>
+              <AppText style={styles.modalTitle} variant="title">Nuevo usuario</AppText>
 
               <TextInput label="Nombre completo *" value={form.fullName} onChangeText={v => setForm({ ...form, fullName: v })} mode="outlined" style={styles.input} />
               <TextInput label="Username *" value={form.username} onChangeText={v => setForm({ ...form, username: v.toLowerCase().replace(/\s+/g, '.') })} mode="outlined" style={styles.input} autoCapitalize="none" />
@@ -345,7 +346,7 @@ export default function UsersScreen() {
 
               {/* Selector de local principal — opcional desde SPRINT-09 (un perfil
                   de solo lectura como contador/socio puede no tener uno fijo) */}
-              <Text style={styles.fieldLabel}>Local principal</Text>
+              <AppText style={styles.fieldLabel} variant="label">Local principal</AppText>
               <View style={styles.storeSelector}>
                 {stores.map(s => (
                   <TouchableOpacity
@@ -361,14 +362,14 @@ export default function UsersScreen() {
               </View>
 
               {/* Perfil acotado (opcional) — etiqueta libre + módulos + locales accesibles */}
-              <Text style={styles.fieldLabel}>Rol / cargo (opcional)</Text>
+              <AppText style={styles.fieldLabel} variant="label">Rol / cargo (opcional)</AppText>
               <TextInput
                 label="Ej. Contador, Socio" value={form.businessRole}
                 onChangeText={v => setForm({ ...form, businessRole: v })}
                 mode="outlined" style={styles.input}
               />
 
-              <Text style={styles.fieldLabel}>Módulos habilitados (opcional)</Text>
+              <AppText style={styles.fieldLabel} variant="label">Módulos habilitados (opcional)</AppText>
               <View style={styles.storeSelector}>
                 {MODULES.map(m => {
                   const active = form.permissions.includes(m.value);
@@ -389,7 +390,7 @@ export default function UsersScreen() {
                 })}
               </View>
 
-              <Text style={styles.fieldLabel}>Locales accesibles (opcional)</Text>
+              <AppText style={styles.fieldLabel} variant="label">Locales accesibles (opcional)</AppText>
               <View style={styles.storeSelector}>
                 {stores.map(s => {
                   const active = form.storeIds.includes(String(s.id));
@@ -410,15 +411,15 @@ export default function UsersScreen() {
                 })}
               </View>
               {(form.businessRole || form.permissions.length > 0 || form.storeIds.length > 0) && (
-                <Text style={styles.roleNote}>
+                <AppText variant="caption" style={styles.roleNote}>
                   Si no marcás módulos o locales accesibles, este usuario no va a poder ver nada hasta que se los asignes desde la fila de la tabla.
-                </Text>
+                </AppText>
               )}
 
               {/* Selector de rol — solo root puede asignar admin */}
               {isRoot ? (
                 <View style={{ marginBottom: SPACE.s2 }}>
-                  <Text style={styles.fieldLabel}>Rol *</Text>
+                  <AppText style={styles.fieldLabel} variant="label">Rol *</AppText>
                   <View style={styles.storeSelector}>
                     {(['user', 'admin'] as const).map(r => (
                       <TouchableOpacity
@@ -434,7 +435,7 @@ export default function UsersScreen() {
                   </View>
                 </View>
               ) : (
-                <Text style={styles.roleNote}>El usuario recibirá el rol <Text style={{ fontWeight: '900' }}>user</Text> automáticamente.</Text>
+                <AppText variant="caption" style={styles.roleNote}>El usuario recibirá el rol <Text style={{ fontWeight: '900' }}>user</Text> automáticamente.</AppText>
               )}
 
               <View style={styles.modalActions}>
@@ -450,9 +451,9 @@ export default function UsersScreen() {
       <Modal visible={!!reassignModal} transparent animationType="fade" onRequestClose={() => setReassignModal(null)}>
         <View style={styles.overlay}>
           <View style={styles.modal}>
-            <Text style={styles.modalTitle}>Reasignar local</Text>
-            <Text style={styles.modalSub}>{reassignModal?.fullName}</Text>
-            <Text style={styles.fieldLabel}>Seleccioná el nuevo local:</Text>
+            <AppText style={styles.modalTitle} variant="title">Reasignar local</AppText>
+            <AppText style={styles.modalSub} variant="subtitle">{reassignModal?.fullName}</AppText>
+            <AppText style={styles.fieldLabel} variant="label">Seleccioná el nuevo local:</AppText>
             <View style={styles.storeSelector}>
               {stores.map(s => (
                 <TouchableOpacity
@@ -478,8 +479,8 @@ export default function UsersScreen() {
       <Modal visible={!!resetModal} transparent animationType="fade" onRequestClose={() => setResetModal(null)}>
         <View style={styles.overlay}>
           <View style={styles.modal}>
-            <Text style={styles.modalTitle}>Cambiar contraseña</Text>
-            <Text style={styles.modalSub}>{resetModal?.fullName} (@{resetModal?.username})</Text>
+            <AppText style={styles.modalTitle} variant="title">Cambiar contraseña</AppText>
+            <AppText style={styles.modalSub} variant="subtitle">{resetModal?.fullName} (@{resetModal?.username})</AppText>
             <TextInput
               label="Nueva contraseña *" value={newPassword}
               onChangeText={setNewPassword}
@@ -500,10 +501,10 @@ export default function UsersScreen() {
         <View style={styles.overlay}>
           <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 16 }}>
             <View style={[styles.modal, { width: '100%', maxWidth: 440 }]}>
-              <Text style={styles.modalTitle}>Permisos de acceso</Text>
-              <Text style={styles.modalSub}>{permModal?.fullName}</Text>
+              <AppText style={styles.modalTitle} variant="title">Permisos de acceso</AppText>
+              <AppText style={styles.modalSub} variant="subtitle">{permModal?.fullName}</AppText>
 
-              <Text style={styles.fieldLabel}>Módulos habilitados</Text>
+              <AppText style={styles.fieldLabel} variant="label">Módulos habilitados</AppText>
               <View style={styles.storeSelector}>
                 {MODULES.map(m => {
                   const active = permSelected.includes(m.value);
@@ -521,7 +522,7 @@ export default function UsersScreen() {
                 })}
               </View>
 
-              <Text style={styles.fieldLabel}>Locales accesibles</Text>
+              <AppText style={styles.fieldLabel} variant="label">Locales accesibles</AppText>
               <View style={styles.storeSelector}>
                 {stores.map(s => {
                   const active = permStoreIds.includes(String(s.id));
@@ -540,9 +541,9 @@ export default function UsersScreen() {
               </View>
 
               {permSelected.length === 0 && permStoreIds.length === 0 && (
-                <Text style={styles.roleNote}>
+                <AppText variant="caption" style={styles.roleNote}>
                   Sin módulos ni locales asignados, este usuario no va a poder ver ninguna pantalla restringida.
-                </Text>
+                </AppText>
               )}
 
               <View style={styles.modalActions}>
@@ -574,11 +575,8 @@ const styles = StyleSheet.create({
 
   header:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: SPACE.s2, padding: SPACE.s4, backgroundColor: COLOR.surface, borderBottomWidth: 1, borderBottomColor: COLOR.border },
   headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE.s2 },
-  headerTitle:    { fontSize: FONT_SIZE.h1, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
 
   empty:          { flex: 1, justifyContent: 'center', alignItems: 'center', gap: SPACE.s2, padding: SPACE.s8 },
-  emptyText:      { fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
-  emptySub:       { fontSize: FONT_SIZE.label, color: COLOR.inkMute },
 
   rowHeader:      { backgroundColor: COLOR.surface2, borderBottomWidth: 2, borderBottomColor: COLOR.border },
   row:            { flexDirection: 'row', alignItems: 'center', backgroundColor: COLOR.surface, borderBottomWidth: 1, borderBottomColor: COLOR.border, paddingHorizontal: SPACE.s1, minHeight: 56 },
@@ -600,11 +598,11 @@ const styles = StyleSheet.create({
 
   overlay:        { flex: 1, backgroundColor: COLOR.overlay, justifyContent: 'center', alignItems: 'center' },
   modal:          { backgroundColor: COLOR.surface, borderRadius: RADIUS.r4, padding: SPACE.s5, width: '92%', maxWidth: 440, gap: SPACE.s1 },
-  modalTitle:     { fontSize: FONT_SIZE.h1, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, marginBottom: SPACE.s1 },
-  modalSub:       { fontSize: FONT_SIZE.label, color: COLOR.ink2, fontWeight: FONT_WEIGHT.semibold as any, marginBottom: SPACE.s2 },
+  modalTitle:     { marginBottom: SPACE.s1 },
+  modalSub:       { marginBottom: SPACE.s2 },
   modalActions:   { flexDirection: 'row', gap: SPACE.s2, marginTop: SPACE.s3 },
   input:          { marginBottom: SPACE.s2 },
-  fieldLabel:     { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.inkMute, marginBottom: SPACE.s2, marginTop: SPACE.s1 },
+  fieldLabel:     { marginBottom: SPACE.s2, marginTop: SPACE.s1 },
 
   storeSelector:  { flexDirection: 'row', flexWrap: 'wrap', gap: SPACE.s2, marginBottom: SPACE.s3 },
   storeChip:      { paddingHorizontal: SPACE.s4, paddingVertical: SPACE.s2, borderRadius: RADIUS.full, backgroundColor: COLOR.bg, borderWidth: 1, borderColor: COLOR.border },
@@ -612,5 +610,5 @@ const styles = StyleSheet.create({
   storeChipText:  { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.semibold as any, color: COLOR.ink2 },
   storeChipTextActive: { color: COLOR.ink, fontWeight: FONT_WEIGHT.bold as any },
 
-  roleNote:       { fontSize: FONT_SIZE.caption, color: COLOR.inkMute, backgroundColor: COLOR.bgAlt, borderRadius: RADIUS.r2, padding: SPACE.s2, marginBottom: SPACE.s1 },
+  roleNote:       { backgroundColor: COLOR.bgAlt, borderRadius: RADIUS.r2, padding: SPACE.s2, marginBottom: SPACE.s1 },
 });
