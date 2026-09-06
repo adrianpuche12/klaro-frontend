@@ -64,6 +64,7 @@ interface MenuItem { key: SidebarScreen; label: string; icon: string }
 // ROOT — acceso completo + configuración del tenant
 const MENU_ROOT: MenuItem[] = [
   { key: 'dashboard',    label: 'Dashboard',       icon: 'view-dashboard-outline' },
+  { key: 'sales',        label: 'Ventas',           icon: 'cart-outline' },
   { key: 'salesHistory', label: 'Historial ventas', icon: 'receipt-text-outline' },
   { key: 'inventory',    label: 'Inventario',       icon: 'package-variant' },
   { key: 'users',        label: 'Usuarios',         icon: 'account-multiple-outline' },
@@ -75,6 +76,7 @@ const MENU_ROOT: MenuItem[] = [
 // ADMIN — gestión operativa sin configuración de locales ni tenant
 const MENU_ADMIN: MenuItem[] = [
   { key: 'dashboard',    label: 'Dashboard',       icon: 'view-dashboard-outline' },
+  { key: 'sales',        label: 'Ventas',           icon: 'cart-outline' },
   { key: 'salesHistory', label: 'Historial ventas', icon: 'receipt-text-outline' },
   { key: 'inventory',    label: 'Inventario',       icon: 'package-variant' },
   { key: 'users',        label: 'Usuarios',         icon: 'account-multiple-outline' },
