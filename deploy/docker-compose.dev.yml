@@ -1,7 +1,0 @@
-services:
-  belopia-frontend-dev:
-    image: adrianpuche/belopia-frontend:dev-latest
-    container_name: belopia-frontend-dev
-    restart: unless-stopped
-    ports:
-      - "8113:80"
