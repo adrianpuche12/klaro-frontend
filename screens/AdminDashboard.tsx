@@ -12,10 +12,12 @@ import DashboardScreen from './DashboardScreen';
 import UsersScreen from './UsersScreen';
 import RolesScreen from './RolesScreen';
 import TenantConfigScreen from './TenantConfigScreen';
+import DynamicFormScreen from './DynamicFormScreen';
 
 const SCREEN_TITLE: Record<SidebarScreen, string> = {
   dashboard:    'Dashboard',
   operations:   'Operaciones',
+  finance:      'Finanzas',
   inventory:    'Inventario',
   stores:       'Locales',
   salesHistory: 'Historial ventas',
@@ -68,7 +70,8 @@ const AdminDashboard = () => {
           {activeScreen === 'dashboard'    && <DashboardScreen />}
           {activeScreen === 'users'        && <UsersScreen />}
           {activeScreen === 'roles'        && <RolesScreen />}
-          {activeScreen === 'operations'   && <AdminScreen />}
+          {activeScreen === 'finance'      && <AdminScreen />}
+          {activeScreen === 'operations'   && <DynamicFormScreen />}
           {activeScreen === 'inventory'    && <InventoryScreen />}
           {activeScreen === 'stores'       && <StoresScreen />}
           {activeScreen === 'sales'        && <POSScreen />}
