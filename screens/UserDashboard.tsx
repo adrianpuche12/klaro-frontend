@@ -12,27 +12,37 @@ import POSScreen from './POSScreen';
 import InventoryScreen from './InventoryScreen';
 import SalesHistoryScreen from './SalesHistoryScreen';
 import DynamicFormScreen from './DynamicFormScreen';
+import DashboardScreen from './DashboardScreen';
+import AdminScreen from './AdminScreen';
 
-type UserScreen = 'sales' | 'inventory' | 'salesHistory' | 'operaciones';
+type UserScreen = 'dashboard' | 'sales' | 'inventory' | 'salesHistory' | 'finance' | 'operaciones';
 
-// Mapea cada item de menú al módulo de permisos que lo habilita (SPRINT-09).
-// Mismo catálogo que PermissionModule en el backend / MODULES en UsersScreen.
-const MENU: { key: UserScreen; label: string; icon: string; module: string }[] = [
-  { key: 'sales',        label: 'Ventas',      icon: 'cart-outline',              module: 'POS' },
-  { key: 'inventory',    label: 'Inventario',  icon: 'package-variant',           module: 'INVENTORY' },
-  { key: 'salesHistory', label: 'Mis ventas',  icon: 'receipt-text-outline',      module: 'SALES_HISTORY' },
-  { key: 'operaciones',  label: 'Operaciones', icon: 'clipboard-text-outline',    module: 'OPERATIONS' },
+// Mapea cada item de menú al/los módulo(s) de permisos que lo habilitan
+// (SPRINT-09/SPRINT-14). Mismo catálogo que PermissionModule en el backend /
+// MODULES en constants/permissionModules.ts. "Inventario" cubre INVENTORY+
+// CATALOG y "Finanzas" cubre TRANSACTIONS+SALARY_PAYMENTS+SUPPLIER_PAYMENTS
+// porque hoy son pantallas compartidas -- ver Sidebar.tsx (mismo agrupamiento
+// para el dashboard de staff privilegiado).
+const MENU: { key: UserScreen; label: string; icon: string; modules: string[] }[] = [
+  { key: 'dashboard',    label: 'Dashboard',   icon: 'view-dashboard-outline',    modules: ['DASHBOARD'] },
+  { key: 'sales',        label: 'Ventas',      icon: 'cart-outline',              modules: ['POS'] },
+  { key: 'inventory',    label: 'Inventario',  icon: 'package-variant',           modules: ['INVENTORY', 'CATALOG'] },
+  { key: 'salesHistory', label: 'Mis ventas',  icon: 'receipt-text-outline',      modules: ['SALES_HISTORY'] },
+  { key: 'finance',      label: 'Finanzas',    icon: 'cash-multiple',             modules: ['TRANSACTIONS', 'SALARY_PAYMENTS', 'SUPPLIER_PAYMENTS'] },
+  { key: 'operaciones',  label: 'Operaciones', icon: 'clipboard-text-outline',    modules: ['OPERATIONS'] },
 ];
 
 /**
  * Filtra el menú según los permisos del usuario. Espeja la excepción legacy
- * de PermissionGuard en el backend: sin businessRole ni ninguna fila de perfil
- * acotado (permissions/accessibleStoreIds vacíos) = cuenta creada antes de
- * SPRINT-09 = acceso total, mismo comportamiento de siempre. Con perfil acotado,
- * "permissions vacío" significa CERO módulos, no todos.
+ * de PermissionGuard en el backend: sin Role asignado NI businessRole NI
+ * ninguna fila de perfil acotado (permissions/accessibleStoreIds vacíos) =
+ * cuenta creada antes de SPRINT-09/14 = acceso total, mismo comportamiento de
+ * siempre. Con Role asignado, "permissions vacío" significa CERO módulos
+ * marcados, no todos -- por eso roleId es parte de la condición de legacy.
  */
 interface UserProfile {
   storeId?: number | null;
+  roleId?: number | null;
   businessRole?: string | null;
   permissions?: string[];
   accessibleStoreIds?: number[];
@@ -40,12 +50,13 @@ interface UserProfile {
 
 function visibleMenuFor(profile: UserProfile | null): typeof MENU {
   if (!profile) return MENU;
-  const isLegacy = !profile.businessRole
+  const isLegacy = !profile.roleId
+    && !profile.businessRole
     && (!profile.permissions || profile.permissions.length === 0)
     && (!profile.accessibleStoreIds || profile.accessibleStoreIds.length === 0);
   if (isLegacy) return MENU;
   const perms = profile.permissions ?? [];
-  return MENU.filter(item => perms.includes(item.module));
+  return MENU.filter(item => item.modules.some(m => perms.includes(m)));
 }
 
 // ─── Sidebar del usuario ──────────────────────────────────────────────────────
@@ -188,9 +199,11 @@ const UserContent = () => {
           </View>
         ) : (
           <>
+            {active === 'dashboard'    && <DashboardScreen />}
             {active === 'sales'        && <POSScreen hideStoreSelector />}
             {active === 'inventory'    && <InventoryScreen />}
             {active === 'salesHistory' && <SalesHistoryScreen />}
+            {active === 'finance'      && <AdminScreen />}
             {active === 'operaciones'  && <DynamicFormScreen />}
           </>
         )}

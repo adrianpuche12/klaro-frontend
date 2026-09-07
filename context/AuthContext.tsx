@@ -15,20 +15,36 @@ interface AuthState {
   /** SPRINT-14: Keycloak ya no distingue admin/user (todos son "staff") --
    * esto viene del Role asignado en la app, no del JWT. root siempre true. */
   canManageUsers: boolean;
+  /** Módulos habilitados por el Role asignado (ver constants/permissionModules.ts).
+   * null = excepción legacy (mismo criterio que PermissionGuard.isLegacy en el
+   * backend): sin Role Y sin businessRole/permissions/accessibleStores -> acceso
+   * total, no "cero módulos". root no necesita este campo, ve todo siempre. */
+  permissions: string[] | null;
   userName: string | null;
   userId: string | null;
   loading: boolean;
   error: string | null;
 }
 
-/** Resuelve canManageUsers para un staff no-root consultando su perfil.
- * root ya tiene acceso total por su rol de Keycloak, no necesita esto. */
-async function fetchCanManageUsers(username: string): Promise<boolean> {
+interface ProfileAccess { canManageUsers: boolean; permissions: string[] | null }
+
+/** Resuelve canManageUsers + permissions para un staff no-root consultando su
+ * perfil. root ya tiene acceso total por su rol de Keycloak, no necesita esto.
+ * Espeja PermissionGuard.isLegacy() del backend: sin fila en absoluto, o con
+ * fila pero sin Role ni datos del modelo viejo (businessRole/permissions/
+ * accessibleStores), es la excepción legacy de acceso total. */
+async function fetchProfileAccess(username: string): Promise<ProfileAccess> {
   try {
     const res = await axios.get(`${REACT_APP_API_URL}/api/v2/users/by-username/${username}`);
-    return !!res.data.canManageUsers;
+    const d = res.data;
+    const isLegacy = !d.roleId
+      && !d.businessRole
+      && (!d.permissions || d.permissions.length === 0)
+      && (!d.accessibleStoreIds || d.accessibleStoreIds.length === 0);
+    return { canManageUsers: !!d.canManageUsers, permissions: isLegacy ? null : (d.permissions ?? []) };
   } catch {
-    return false;
+    // Sin fila en app_users -> excepción legacy (mismo criterio que el backend).
+    return { canManageUsers: false, permissions: null };
   }
 }
 
@@ -122,6 +138,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     expiresIn: null,
     roles: [],
     canManageUsers: false,
+    permissions: null,
     userName: null,
     userId: null,
     loading: false,
@@ -202,10 +219,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const userName = decodedToken.preferred_username;
       const userId = decodedToken.sub;
       const appRoles = isRoot ? ['root'] : ['staff'];
-      // canManageUsers no se recalcula en cada refresh (evita una llamada extra
-      // cada ~pocos minutos) -- se mantiene el último valor conocido, refrescado
-      // recién en el próximo login completo. Root siempre true, sin excepción.
+      // canManageUsers/permissions no se recalculan en cada refresh (evita una
+      // llamada extra cada ~pocos minutos) -- se mantiene el último valor
+      // conocido, refrescado recién en el próximo login completo. Root siempre
+      // true/null (acceso total), sin excepción.
       const canManageUsers = isRoot ? true : authState.canManageUsers;
+      const permissions    = isRoot ? null : authState.permissions;
 
       await Storage.multiSet([
         ['accessToken', access_token],
@@ -215,6 +234,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ['userId', userId],
         ['roles', JSON.stringify(appRoles)],
         ['canManageUsers', String(canManageUsers)],
+        ['permissions', JSON.stringify(permissions)],
       ]);
 
       setAxiosAuthHeader(access_token);
@@ -226,6 +246,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         expiresIn: expires_in,
         roles: appRoles,
         canManageUsers,
+        permissions,
         userName,
         userId,
         loading: false,
@@ -275,7 +296,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const appRoles = isRoot ? ['root'] : ['staff'];
 
       setAxiosAuthHeader(access_token); // necesario antes de poder llamar a /by-username
-      const canManageUsers = isRoot ? true : await fetchCanManageUsers(userName);
+      const { canManageUsers, permissions } = isRoot
+        ? { canManageUsers: true, permissions: null }
+        : await fetchProfileAccess(userName);
 
       await Storage.multiSet([
         ['accessToken', access_token],
@@ -285,6 +308,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ['userId', userId],
         ['roles', JSON.stringify(appRoles)],
         ['canManageUsers', String(canManageUsers)],
+        ['permissions', JSON.stringify(permissions)],
       ]);
 
       scheduleRefresh(access_token);
@@ -294,6 +318,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         expiresIn: expires_in,
         roles: appRoles,
         canManageUsers,
+        permissions,
         userName,
         userId,
         loading: false,
@@ -322,7 +347,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         'userName',
         'userId',
         'roles',
-        'canManageUsers'
+        'canManageUsers',
+        'permissions'
       ]);
 
       setAxiosAuthHeader(null);
@@ -332,6 +358,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         expiresIn: null,
         roles: [],
         canManageUsers: false,
+        permissions: null,
         userName: null,
         userId: null,
         loading: false,
@@ -352,7 +379,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           'userName',
           'userId',
           'roles',
-          'canManageUsers'
+          'canManageUsers',
+          'permissions'
         ]);
     
         const storageMap = Object.fromEntries(storageData);
@@ -374,12 +402,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               } catch (e) {
               }
               
+              let permissions: string[] | null = null;
+              try {
+                if (storageMap.permissions) {
+                  permissions = JSON.parse(storageMap.permissions);
+                }
+              } catch (e) {
+              }
+
               setAuthState({
                 accessToken,
                 refreshToken,
                 expiresIn: parseInt(storageMap.expiresIn || '0', 10),
                 roles,
                 canManageUsers: storageMap.canManageUsers === 'true',
+                permissions,
                 userName: storageMap.userName,
                 userId: storageMap.userId,
                 loading: false,
@@ -393,6 +430,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               refreshToken: null,
               roles: [],
               canManageUsers: false,
+              permissions: null,
               loading: false,
               error: null
             }));
