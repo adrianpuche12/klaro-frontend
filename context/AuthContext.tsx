@@ -2,7 +2,7 @@ import React, { createContext, useState, useContext, useEffect, useRef } from 'r
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
-import { API_KEYCLOAK_ADAPTER_URL } from '../config';
+import { API_KEYCLOAK_ADAPTER_URL, REACT_APP_API_URL } from '../config';
 import { Platform } from 'react-native';
 import { SplashScreen } from '../components/SplashScreen';
 
@@ -12,10 +12,24 @@ interface AuthState {
   refreshToken: string | null;
   expiresIn: number | null;
   roles: string[];
+  /** SPRINT-14: Keycloak ya no distingue admin/user (todos son "staff") --
+   * esto viene del Role asignado en la app, no del JWT. root siempre true. */
+  canManageUsers: boolean;
   userName: string | null;
   userId: string | null;
   loading: boolean;
   error: string | null;
+}
+
+/** Resuelve canManageUsers para un staff no-root consultando su perfil.
+ * root ya tiene acceso total por su rol de Keycloak, no necesita esto. */
+async function fetchCanManageUsers(username: string): Promise<boolean> {
+  try {
+    const res = await axios.get(`${REACT_APP_API_URL}/api/v2/users/by-username/${username}`);
+    return !!res.data.canManageUsers;
+  } catch {
+    return false;
+  }
 }
 
 
@@ -107,6 +121,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshToken: null,
     expiresIn: null,
     roles: [],
+    canManageUsers: false,
     userName: null,
     userId: null,
     loading: false,
@@ -184,10 +199,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const decodedToken = jwtDecode<any>(access_token);
       const userRoles = decodedToken.realm_access?.roles || [];
       const isRoot  = userRoles.includes('root');
-      const isAdmin = userRoles.includes('admin');
       const userName = decodedToken.preferred_username;
       const userId = decodedToken.sub;
-      const appRoles = isRoot ? ['root'] : isAdmin ? ['admin'] : ['user'];
+      const appRoles = isRoot ? ['root'] : ['staff'];
+      // canManageUsers no se recalcula en cada refresh (evita una llamada extra
+      // cada ~pocos minutos) -- se mantiene el último valor conocido, refrescado
+      // recién en el próximo login completo. Root siempre true, sin excepción.
+      const canManageUsers = isRoot ? true : authState.canManageUsers;
 
       await Storage.multiSet([
         ['accessToken', access_token],
@@ -196,6 +214,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ['userName', userName],
         ['userId', userId],
         ['roles', JSON.stringify(appRoles)],
+        ['canManageUsers', String(canManageUsers)],
       ]);
 
       setAxiosAuthHeader(access_token);
@@ -206,6 +225,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         refreshToken: refresh_token,
         expiresIn: expires_in,
         roles: appRoles,
+        canManageUsers,
         userName,
         userId,
         loading: false,
@@ -247,10 +267,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const userRoles = decodedToken.realm_access?.roles || [];
       const isRoot  = userRoles.includes('root');
-      const isAdmin = userRoles.includes('admin');
       const userName = decodedToken.preferred_username;
       const userId = decodedToken.sub;
-      const appRoles = isRoot ? ['root'] : isAdmin ? ['admin'] : ['user'];
+      // SPRINT-14: Keycloak colapsó admin/user -> "staff". root sigue siendo
+      // un rol real de Keycloak; todo lo demás es "staff" y la granularidad
+      // (canManageUsers) viene del Role asignado en la app, no del JWT.
+      const appRoles = isRoot ? ['root'] : ['staff'];
+
+      setAxiosAuthHeader(access_token); // necesario antes de poder llamar a /by-username
+      const canManageUsers = isRoot ? true : await fetchCanManageUsers(userName);
 
       await Storage.multiSet([
         ['accessToken', access_token],
@@ -259,15 +284,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ['userName', userName],
         ['userId', userId],
         ['roles', JSON.stringify(appRoles)],
+        ['canManageUsers', String(canManageUsers)],
       ]);
 
-      setAxiosAuthHeader(access_token);
       scheduleRefresh(access_token);
       setAuthState({
         accessToken: access_token,
         refreshToken: refresh_token,
         expiresIn: expires_in,
         roles: appRoles,
+        canManageUsers,
         userName,
         userId,
         loading: false,
@@ -290,20 +316,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     try {
       await Storage.multiRemove([
-        'accessToken', 
-        'refreshToken', 
-        'expiresIn', 
-        'userName', 
-        'userId', 
-        'roles'
+        'accessToken',
+        'refreshToken',
+        'expiresIn',
+        'userName',
+        'userId',
+        'roles',
+        'canManageUsers'
       ]);
-      
+
       setAxiosAuthHeader(null);
       setAuthState({
         accessToken: null,
         refreshToken: null,
         expiresIn: null,
         roles: [],
+        canManageUsers: false,
         userName: null,
         userId: null,
         loading: false,
@@ -323,7 +351,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           'expiresIn',
           'userName',
           'userId',
-          'roles'
+          'roles',
+          'canManageUsers'
         ]);
     
         const storageMap = Object.fromEntries(storageData);
@@ -350,6 +379,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 refreshToken,
                 expiresIn: parseInt(storageMap.expiresIn || '0', 10),
                 roles,
+                canManageUsers: storageMap.canManageUsers === 'true',
                 userName: storageMap.userName,
                 userId: storageMap.userId,
                 loading: false,
@@ -357,11 +387,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               });
             }
           } catch (tokenError) {
-            setAuthState(prev => ({ 
-              ...prev, 
+            setAuthState(prev => ({
+              ...prev,
               accessToken: null,
               refreshToken: null,
               roles: [],
+              canManageUsers: false,
               loading: false,
               error: null
             }));

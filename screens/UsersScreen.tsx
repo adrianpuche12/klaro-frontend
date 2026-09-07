@@ -10,11 +10,14 @@ import { REACT_APP_API_URL } from '../config';
 import { useAuth } from '../context/AuthContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 import AppText from '../components/ui/AppText';
+import { MODULES } from '../constants/permissionModules';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, BREAKPOINT } from '../theme';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 interface Store { id: number; name: string; active: boolean; }
+
+interface RoleOption { id: number; name: string; level: number; canManageUsers: boolean; permissions: string[]; }
 
 interface AppUser {
   id: number;
@@ -23,8 +26,8 @@ interface AppUser {
   status: string;
   storeId?: number;
   storeName?: string;
-  businessRole?: string;
-  permissions?: string[];
+  roleId?: number;
+  roleName?: string;
   accessibleStoreIds?: number[];
   createdAt: string;
 }
@@ -34,32 +37,19 @@ interface UserForm {
   username: string;
   password: string;
   storeId: string;
-  role: 'user' | 'admin';
-  businessRole: string;
-  permissions: string[];
+  /** Role de la app (SPRINT-14) -- reemplaza el toggle user/admin de Keycloak
+   * (que ahora es siempre "staff") y el businessRole libre de SPRINT-09. */
+  roleId: string;
   storeIds: string[];
 }
 
-// Módulos disponibles para un perfil acotado (mismos valores que PermissionModule en el backend)
-const MODULES: { value: string; label: string }[] = [
-  { value: 'DASHBOARD',          label: 'Dashboard' },
-  { value: 'POS',                label: 'Punto de venta' },
-  { value: 'SALES_HISTORY',      label: 'Historial de ventas' },
-  { value: 'INVENTORY',          label: 'Inventario' },
-  { value: 'TRANSACTIONS',       label: 'Movimientos' },
-  { value: 'SALARY_PAYMENTS',    label: 'Pagos de salario' },
-  { value: 'SUPPLIER_PAYMENTS',  label: 'Pagos a proveedores' },
-  { value: 'CATALOG',            label: 'Catálogo' },
-  { value: 'OPERATIONS',         label: 'Operaciones' },
-];
-
 const EMPTY_FORM: UserForm = {
-  fullName: '', username: '', password: '', storeId: '', role: 'user',
-  businessRole: '', permissions: [], storeIds: [],
+  fullName: '', username: '', password: '', storeId: '',
+  roleId: '', storeIds: [],
 };
 
-const statusLabel = (s: string) => s === 'ACTIVE' ? 'Activo' : 'Suspendido';
-const statusColor = (s: string) => s === 'ACTIVE' ? COLOR.income : COLOR.expense;
+const statusLabel = (s: string) => s === 'ACTIVE' ? 'Activo' : s === 'SUSPENDED' ? 'Suspendido' : 'Eliminado';
+const statusColor = (s: string) => s === 'ACTIVE' ? COLOR.income : s === 'SUSPENDED' ? COLOR.expense : COLOR.inkDisabled;
 
 // ─── UsersScreen ──────────────────────────────────────────────────────────────
 
@@ -72,6 +62,7 @@ export default function UsersScreen() {
 
   const [users, setUsers]           = useState<AppUser[]>([]);
   const [stores, setStores]         = useState<Store[]>([]);
+  const [rolesList, setRolesList]   = useState<RoleOption[]>([]);
   const [loading, setLoading]       = useState(false);
   const [snackbar, setSnackbar]     = useState('');
 
@@ -92,11 +83,11 @@ export default function UsersScreen() {
   const [resetting, setResetting]     = useState(false);
   const [showNewPwd, setShowNewPwd]   = useState(false);
 
-  // Modal editar permisos (SPRINT-09)
-  const [permModal, setPermModal]           = useState<AppUser | null>(null);
-  const [permSelected, setPermSelected]     = useState<string[]>([]);
-  const [permStoreIds, setPermStoreIds]     = useState<string[]>([]);
-  const [savingPerms, setSavingPerms]       = useState(false);
+  // Modal cambiar Role + locales accesibles (SPRINT-14)
+  const [accessModal, setAccessModal]       = useState<AppUser | null>(null);
+  const [accessRoleId, setAccessRoleId]     = useState('');
+  const [accessStoreIds, setAccessStoreIds] = useState<string[]>([]);
+  const [savingAccess, setSavingAccess]     = useState(false);
 
   // ConfirmDialog
   const [confirmDlg, setConfirmDlg] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
@@ -107,15 +98,18 @@ export default function UsersScreen() {
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    // Carga independiente: si usuarios falla, locales igual se cargan para el formulario
-    const [usersRes, storesRes] = await Promise.allSettled([
+    // Carga independiente: si una falla, las demás igual cargan para el formulario
+    const [usersRes, storesRes, rolesRes] = await Promise.allSettled([
       axios.get<AppUser[]>(`${API}/api/v2/users`),
       axios.get<Store[]>(`${API}/api/v2/stores/active`),
+      axios.get<RoleOption[]>(`${API}/api/v2/roles`),
     ]);
     if (usersRes.status === 'fulfilled')  setUsers(usersRes.value.data);
     else setSnackbar('Error al cargar usuarios');
     if (storesRes.status === 'fulfilled') setStores(storesRes.value.data);
     else setSnackbar('Error al cargar locales');
+    if (rolesRes.status === 'fulfilled')  setRolesList(rolesRes.value.data);
+    // Si roles falla, no bloqueamos la pantalla -- el picker queda vacío
     setLoading(false);
   }, []);
 
@@ -132,14 +126,12 @@ export default function UsersScreen() {
     setSaving(true);
     try {
       await axios.post(`${API}/api/v2/users`, {
-        fullName:     form.fullName.trim(),
-        username:     form.username.trim().toLowerCase(),
-        password:     form.password,
-        storeId:      form.storeId ? Number(form.storeId) : null,
-        role:         form.role,
-        businessRole: form.businessRole.trim() || null,
-        permissions:  form.permissions,
-        storeIds:     form.storeIds.map(Number),
+        fullName: form.fullName.trim(),
+        username: form.username.trim().toLowerCase(),
+        password: form.password,
+        storeId:  form.storeId ? Number(form.storeId) : null,
+        roleId:   form.roleId ? Number(form.roleId) : null,
+        storeIds: form.storeIds.map(Number),
       });
       setSnackbar('Usuario creado correctamente');
       setCreateModal(false);
@@ -211,26 +203,30 @@ export default function UsersScreen() {
     finally { setResetting(false); }
   };
 
-  // ── Editar permisos (SPRINT-09) ────────────────────────────────────────────
+  // ── Cambiar Role + locales accesibles (SPRINT-14) ────────────────────────
 
-  const openPermissions = (user: AppUser) => {
-    setPermModal(user);
-    setPermSelected(user.permissions ?? []);
-    setPermStoreIds((user.accessibleStoreIds ?? []).map(String));
+  const openAccess = (user: AppUser) => {
+    setAccessModal(user);
+    setAccessRoleId(user.roleId ? String(user.roleId) : '');
+    setAccessStoreIds((user.accessibleStoreIds ?? []).map(String));
   };
 
-  const handleSavePermissions = async () => {
-    if (!permModal) return;
-    setSavingPerms(true);
+  const handleSaveAccess = async () => {
+    if (!accessModal) return;
+    setSavingAccess(true);
     try {
-      await axios.put(`${API}/api/v2/users/${permModal.id}/permissions`, { permissions: permSelected });
-      await axios.put(`${API}/api/v2/users/${permModal.id}/store-access`, { storeIds: permStoreIds.map(Number) });
+      await axios.put(`${API}/api/v2/users/${accessModal.id}/role`, {
+        roleId: accessRoleId ? Number(accessRoleId) : null,
+      });
+      await axios.put(`${API}/api/v2/users/${accessModal.id}/store-access`, {
+        storeIds: accessStoreIds.map(Number),
+      });
       setSnackbar('Permisos actualizados correctamente');
-      setPermModal(null);
+      setAccessModal(null);
       loadAll();
     } catch (e: any) {
       setSnackbar(e.response?.data?.error || 'Error al actualizar permisos');
-    } finally { setSavingPerms(false); }
+    } finally { setSavingAccess(false); }
   };
 
   // ── Eliminar ───────────────────────────────────────────────────────────────
@@ -238,7 +234,7 @@ export default function UsersScreen() {
   const handleDelete = (user: AppUser) => {
     askConfirm(
       'Eliminar usuario',
-      `¿Eliminar permanentemente a "${user.fullName}"? No podrá volver a iniciar sesión.`,
+      `¿Eliminar a "${user.fullName}"? No podrá volver a iniciar sesión.`,
       async () => {
         try {
           await axios.delete(`${API}/api/v2/users/${user.id}`);
@@ -283,17 +279,18 @@ export default function UsersScreen() {
               <Text style={[styles.cell, styles.cellName, styles.colHeader]}>Nombre</Text>
               <Text style={[styles.cell, styles.cellUser, styles.colHeader]}>Usuario</Text>
               <Text style={[styles.cell, styles.cellStore, styles.colHeader]}>Local</Text>
+              <Text style={[styles.cell, styles.cellRole, styles.colHeader]}>Role</Text>
               <Text style={[styles.cell, styles.cellStatus, styles.colHeader]}>Estado</Text>
               <Text style={[styles.cell, styles.cellActions, styles.colHeader]}>Acciones</Text>
             </View>
           )}
 
           {users.map(user => (
-            <View key={user.id} style={[styles.row, user.status === 'SUSPENDED' && styles.rowSuspended]}>
+            <View key={user.id} style={[styles.row, user.status !== 'ACTIVE' && styles.rowSuspended]}>
               {/* Nombre */}
               <View style={[styles.cell, styles.cellName]}>
                 <Text style={styles.userName}>{user.fullName}</Text>
-                {!isDesktop && <Text style={styles.userMeta}>@{user.username} · {user.storeName || user.businessRole || 'Sin local principal'}</Text>}
+                {!isDesktop && <Text style={styles.userMeta}>@{user.username} · {user.storeName || user.roleName || 'Sin local principal'}</Text>}
               </View>
 
               {/* Usuario (solo desktop) */}
@@ -301,6 +298,9 @@ export default function UsersScreen() {
 
               {/* Local (solo desktop) */}
               {isDesktop && <Text style={[styles.cell, styles.cellStore, styles.metaText]}>{user.storeName || '—'}</Text>}
+
+              {/* Role (solo desktop) */}
+              {isDesktop && <Text style={[styles.cell, styles.cellRole, styles.metaText]}>{user.roleName || '—'}</Text>}
 
               {/* Estado */}
               <View style={[styles.cell, styles.cellStatus]}>
@@ -315,12 +315,15 @@ export default function UsersScreen() {
               <View style={[styles.cell, styles.cellActions]}>
                 {user.status === 'ACTIVE'
                   ? <IconButton icon="pause-circle" size={20} iconColor={COLOR.warn} onPress={() => handleSuspend(user)} style={{ margin: 0 }} />
-                  : <IconButton icon="play-circle" size={20} iconColor={COLOR.income} onPress={() => handleActivate(user)} style={{ margin: 0 }} />
-                }
+                  : user.status === 'SUSPENDED'
+                  ? <IconButton icon="play-circle" size={20} iconColor={COLOR.income} onPress={() => handleActivate(user)} style={{ margin: 0 }} />
+                  : null}
                 <IconButton icon="store-edit" size={20} iconColor={COLOR.info} onPress={() => { setReassignModal(user); setReassignStoreId(user.storeId ? String(user.storeId) : ''); }} style={{ margin: 0 }} />
-                <IconButton icon="shield-account" size={20} iconColor={COLOR.brand} onPress={() => openPermissions(user)} style={{ margin: 0 }} />
+                <IconButton icon="shield-account" size={20} iconColor={COLOR.brand} onPress={() => openAccess(user)} style={{ margin: 0 }} />
                 <IconButton icon="lock-reset" size={20} iconColor={COLOR.ink2} onPress={() => { setResetModal(user); setNewPassword(''); }} style={{ margin: 0 }} />
-                <IconButton icon="delete" size={20} iconColor={COLOR.expense} onPress={() => handleDelete(user)} style={{ margin: 0 }} />
+                {user.status !== 'DELETED' && (
+                  <IconButton icon="delete" size={20} iconColor={COLOR.expense} onPress={() => handleDelete(user)} style={{ margin: 0 }} />
+                )}
               </View>
             </View>
           ))}
@@ -361,33 +364,24 @@ export default function UsersScreen() {
                 ))}
               </View>
 
-              {/* Perfil acotado (opcional) — etiqueta libre + módulos + locales accesibles */}
-              <AppText style={styles.fieldLabel} variant="label">Rol / cargo (opcional)</AppText>
-              <TextInput
-                label="Ej. Contador, Socio" value={form.businessRole}
-                onChangeText={v => setForm({ ...form, businessRole: v })}
-                mode="outlined" style={styles.input}
-              />
-
-              <AppText style={styles.fieldLabel} variant="label">Módulos habilitados (opcional)</AppText>
+              {/* Role (SPRINT-14) — root define los Roles disponibles y sus módulos
+                  desde la pantalla de Roles; acá solo se elige cuál asignar. */}
+              <AppText style={styles.fieldLabel} variant="label">Role (opcional)</AppText>
               <View style={styles.storeSelector}>
-                {MODULES.map(m => {
-                  const active = form.permissions.includes(m.value);
-                  return (
-                    <TouchableOpacity
-                      key={m.value}
-                      style={[styles.storeChip, active && styles.storeChipActive]}
-                      onPress={() => setForm({
-                        ...form,
-                        permissions: active
-                          ? form.permissions.filter(p => p !== m.value)
-                          : [...form.permissions, m.value],
-                      })}
-                    >
-                      <Text style={[styles.storeChipText, active && styles.storeChipTextActive]}>{m.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                {rolesList.length === 0 && (
+                  <AppText variant="caption">Todavía no hay Roles creados — pedile a root que cree uno.</AppText>
+                )}
+                {rolesList.map(r => (
+                  <TouchableOpacity
+                    key={r.id}
+                    style={[styles.storeChip, form.roleId === String(r.id) && styles.storeChipActive]}
+                    onPress={() => setForm({ ...form, roleId: form.roleId === String(r.id) ? '' : String(r.id) })}
+                  >
+                    <Text style={[styles.storeChipText, form.roleId === String(r.id) && styles.storeChipTextActive]}>
+                      {r.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
 
               <AppText style={styles.fieldLabel} variant="label">Locales accesibles (opcional)</AppText>
@@ -410,32 +404,15 @@ export default function UsersScreen() {
                   );
                 })}
               </View>
-              {(form.businessRole || form.permissions.length > 0 || form.storeIds.length > 0) && (
-                <AppText variant="caption" style={styles.roleNote}>
-                  Si no marcás módulos o locales accesibles, este usuario no va a poder ver nada hasta que se los asignes desde la fila de la tabla.
-                </AppText>
-              )}
 
-              {/* Selector de rol — solo root puede asignar admin */}
-              {isRoot ? (
-                <View style={{ marginBottom: SPACE.s2 }}>
-                  <AppText style={styles.fieldLabel} variant="label">Rol *</AppText>
-                  <View style={styles.storeSelector}>
-                    {(['user', 'admin'] as const).map(r => (
-                      <TouchableOpacity
-                        key={r}
-                        style={[styles.storeChip, form.role === r && styles.storeChipActive]}
-                        onPress={() => setForm({ ...form, role: r })}
-                      >
-                        <Text style={[styles.storeChipText, form.role === r && styles.storeChipTextActive]}>
-                          {r === 'user' ? 'Cajero (user)' : 'Gerente (admin)'}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
+              {form.roleId ? (
+                <AppText variant="caption" style={styles.roleNote}>
+                  Si no marcás locales accesibles, este usuario no va a poder ver nada hasta que se los asignes desde la fila de la tabla.
+                </AppText>
               ) : (
-                <AppText variant="caption" style={styles.roleNote}>El usuario recibirá el rol <Text style={{ fontWeight: '900' }}>user</Text> automáticamente.</AppText>
+                <AppText variant="caption" style={styles.roleNote}>
+                  Sin Role asignado, este usuario tiene acceso total (igual que las cuentas creadas antes de este sistema). Solo root puede crear así.
+                </AppText>
               )}
 
               <View style={styles.modalActions}>
@@ -496,43 +473,38 @@ export default function UsersScreen() {
         </View>
       </Modal>
 
-      {/* ── Modal editar permisos (SPRINT-09) ── */}
-      <Modal visible={!!permModal} transparent animationType="fade" onRequestClose={() => setPermModal(null)}>
+      {/* ── Modal cambiar Role + locales accesibles (SPRINT-14) ── */}
+      <Modal visible={!!accessModal} transparent animationType="fade" onRequestClose={() => setAccessModal(null)}>
         <View style={styles.overlay}>
           <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 16 }}>
             <View style={[styles.modal, { width: '100%', maxWidth: 440 }]}>
               <AppText style={styles.modalTitle} variant="title">Permisos de acceso</AppText>
-              <AppText style={styles.modalSub} variant="subtitle">{permModal?.fullName}</AppText>
+              <AppText style={styles.modalSub} variant="subtitle">{accessModal?.fullName}</AppText>
 
-              <AppText style={styles.fieldLabel} variant="label">Módulos habilitados</AppText>
+              <AppText style={styles.fieldLabel} variant="label">Role</AppText>
               <View style={styles.storeSelector}>
-                {MODULES.map(m => {
-                  const active = permSelected.includes(m.value);
-                  return (
-                    <TouchableOpacity
-                      key={m.value}
-                      style={[styles.storeChip, active && styles.storeChipActive]}
-                      onPress={() => setPermSelected(active
-                        ? permSelected.filter(p => p !== m.value)
-                        : [...permSelected, m.value])}
-                    >
-                      <Text style={[styles.storeChipText, active && styles.storeChipTextActive]}>{m.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                {rolesList.map(r => (
+                  <TouchableOpacity
+                    key={r.id}
+                    style={[styles.storeChip, accessRoleId === String(r.id) && styles.storeChipActive]}
+                    onPress={() => setAccessRoleId(accessRoleId === String(r.id) ? '' : String(r.id))}
+                  >
+                    <Text style={[styles.storeChipText, accessRoleId === String(r.id) && styles.storeChipTextActive]}>{r.name}</Text>
+                  </TouchableOpacity>
+                ))}
               </View>
 
               <AppText style={styles.fieldLabel} variant="label">Locales accesibles</AppText>
               <View style={styles.storeSelector}>
                 {stores.map(s => {
-                  const active = permStoreIds.includes(String(s.id));
+                  const active = accessStoreIds.includes(String(s.id));
                   return (
                     <TouchableOpacity
                       key={s.id}
                       style={[styles.storeChip, active && styles.storeChipActive]}
-                      onPress={() => setPermStoreIds(active
-                        ? permStoreIds.filter(id => id !== String(s.id))
-                        : [...permStoreIds, String(s.id)])}
+                      onPress={() => setAccessStoreIds(active
+                        ? accessStoreIds.filter(id => id !== String(s.id))
+                        : [...accessStoreIds, String(s.id)])}
                     >
                       <Text style={[styles.storeChipText, active && styles.storeChipTextActive]}>{s.name}</Text>
                     </TouchableOpacity>
@@ -540,15 +512,15 @@ export default function UsersScreen() {
                 })}
               </View>
 
-              {permSelected.length === 0 && permStoreIds.length === 0 && (
+              {accessRoleId && accessStoreIds.length === 0 && (
                 <AppText variant="caption" style={styles.roleNote}>
-                  Sin módulos ni locales asignados, este usuario no va a poder ver ninguna pantalla restringida.
+                  Sin locales asignados, este usuario no va a poder ver ninguna pantalla restringida por local.
                 </AppText>
               )}
 
               <View style={styles.modalActions}>
-                <Button mode="outlined" onPress={() => setPermModal(null)} style={{ flex: 1 }}>Cancelar</Button>
-                <Button mode="contained" onPress={handleSavePermissions} loading={savingPerms} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Guardar</Button>
+                <Button mode="outlined" onPress={() => setAccessModal(null)} style={{ flex: 1 }}>Cancelar</Button>
+                <Button mode="contained" onPress={handleSaveAccess} loading={savingAccess} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Guardar</Button>
               </View>
             </View>
           </ScrollView>
@@ -585,6 +557,7 @@ const styles = StyleSheet.create({
   cellName:       { flex: 1 },
   cellUser:       { width: 140 },
   cellStore:      { width: 110 },
+  cellRole:       { width: 110 },
   cellStatus:     { width: 110 },
   cellActions:    { flexDirection: 'row', alignItems: 'center', width: 160 },
   colHeader:      { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.inkMute } as any,
