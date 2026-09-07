@@ -57,7 +57,7 @@ const ANIM_DURATION       = 250;
 
 export type SidebarScreen =
   | 'dashboard' | 'operations' | 'inventory' | 'stores'
-  | 'sales' | 'salesHistory' | 'users' | 'tenantConfig';
+  | 'sales' | 'salesHistory' | 'users' | 'roles' | 'tenantConfig';
 
 interface MenuItem { key: SidebarScreen; label: string; icon: string }
 
@@ -68,6 +68,7 @@ const MENU_ROOT: MenuItem[] = [
   { key: 'salesHistory', label: 'Historial ventas', icon: 'receipt-text-outline' },
   { key: 'inventory',    label: 'Inventario',       icon: 'package-variant' },
   { key: 'users',        label: 'Usuarios',         icon: 'account-multiple-outline' },
+  { key: 'roles',        label: 'Roles',            icon: 'badge-account-outline' },
   { key: 'operations',   label: 'Operaciones',      icon: 'clipboard-text-outline' },
   { key: 'stores',       label: 'Locales',          icon: 'store-outline' },
   { key: 'tenantConfig', label: 'Configuración',    icon: 'tune-variant' },
@@ -94,11 +95,11 @@ const SidebarDesktop = ({ active, onSelect }: {
   active: SidebarScreen;
   onSelect: (s: SidebarScreen) => void;
 }) => {
-  const { logout, roles, userName } = useAuth();
+  const { logout, roles, canManageUsers, userName } = useAuth();
   const { sidebarCollapsed, toggleSidebar } = useUIPreferences();
   const isRoot  = roles.includes('root');
-  const isAdmin = roles.includes('admin');
-  const menu = isRoot ? MENU_ROOT : isAdmin ? MENU_ADMIN : MENU_USER;
+  // SPRINT-14: Keycloak ya no distingue admin/user -- canManageUsers viene del Role asignado en la app.
+  const menu = isRoot ? MENU_ROOT : canManageUsers ? MENU_ADMIN : MENU_USER;
 
   // Animación de ancho
   const animW = useRef(new Animated.Value(
@@ -215,10 +216,10 @@ const SidebarMobile = ({ active, onSelect, visible, onClose }: {
   visible: boolean;
   onClose: () => void;
 }) => {
-  const { logout, roles, userName } = useAuth();
+  const { logout, roles, canManageUsers, userName } = useAuth();
   const isRoot  = roles.includes('root');
-  const isAdmin = roles.includes('admin');
-  const menu = isRoot ? MENU_ROOT : isAdmin ? MENU_ADMIN : MENU_USER;
+  // SPRINT-14: Keycloak ya no distingue admin/user -- canManageUsers viene del Role asignado en la app.
+  const menu = isRoot ? MENU_ROOT : canManageUsers ? MENU_ADMIN : MENU_USER;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>

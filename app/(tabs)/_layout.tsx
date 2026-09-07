@@ -11,8 +11,10 @@ import { useAuth } from '../../context/AuthContext';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
-  const { roles } = useAuth();
-  const isAdmin = roles.includes('admin') || roles.includes('root');
+  const { roles, canManageUsers } = useAuth();
+  // SPRINT-14: Keycloak ya no distingue admin/user -- canManageUsers viene
+  // del Role asignado en la app. root siempre true.
+  const isAdmin = roles.includes('root') || canManageUsers;
 
   return (
     <Tabs

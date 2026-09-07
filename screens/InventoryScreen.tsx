@@ -255,8 +255,12 @@ const InventoryScreen = () => {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
 
-  const { roles } = useAuth();
-  const isAdmin = roles.includes('admin');
+  const { canManageUsers } = useAuth();
+  // SPRINT-14: preserva el comportamiento exacto de antes (roles.includes('admin'),
+  // sin OR con root -- así era el chequeo original). Si en el futuro esto debería
+  // ser una capacidad propia (ej. INVENTORY_ADJUST) en vez de calcado de "admin",
+  // es una decisión de negocio a confirmar con Jorge, no asumida acá.
+  const isAdmin = canManageUsers;
 
   const { stores, selectedStore, setSelectedStore } = useStore();
   const storeId = selectedStore?.id ?? null;

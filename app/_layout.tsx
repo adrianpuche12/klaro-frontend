@@ -17,12 +17,16 @@ Sentry.init({
 type ValidSegment = 'login' | 'admin' | 'index' | '(tabs)' | '+not-found';
 
 function RootLayoutNav() {
-  const { isAuthenticated, roles } = useAuth();
+  const { isAuthenticated, roles, canManageUsers, loading } = useAuth();
   const segments = useSegments();
   const navigationState = useRootNavigationState();
 
   useEffect(() => {
     if (!navigationState?.key) return;
+    // SPRINT-14: canManageUsers se resuelve async en login() -- mientras
+    // loading sigue true no hay que decidir el routing todavía, evita un
+    // salto a "/" para un manager que en realidad va a "/admin".
+    if (loading) return;
 
     const currentSegment = segments.length > 0 ? (segments[0] as ValidSegment) : '';
 
@@ -30,12 +34,14 @@ function RootLayoutNav() {
       if (!isAuthenticated) {
         if (currentSegment !== 'login') router.replace('/login');
       } else {
-        const isPrivileged = roles.includes('root') || roles.includes('admin');
+        // Keycloak ya no distingue admin/user (todos "staff", SPRINT-14) --
+        // canManageUsers viene del Role asignado en la app. root siempre true.
+        const isPrivileged = roles.includes('root') || canManageUsers;
         if (isPrivileged) {
-          // Root y admin van al dashboard de administración
+          // Root y managers van al dashboard de administración
           if (currentSegment === 'login') router.replace('/admin');
         } else {
-          // User solo puede acceder a las rutas de usuario
+          // Staff sin canManageUsers solo puede acceder a las rutas de usuario
           const allowedSegments = ['index', '(tabs)'];
           if (!allowedSegments.includes(currentSegment)) router.replace('/');
         }
@@ -43,7 +49,7 @@ function RootLayoutNav() {
     };
 
     handleNavigation();
-  }, [isAuthenticated, navigationState?.key, segments, roles]);
+  }, [isAuthenticated, navigationState?.key, segments, roles, canManageUsers, loading]);
 
   return <Slot />;
 }

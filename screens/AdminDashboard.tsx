@@ -10,6 +10,7 @@ import POSScreen from './POSScreen';
 import SalesHistoryScreen from './SalesHistoryScreen';
 import DashboardScreen from './DashboardScreen';
 import UsersScreen from './UsersScreen';
+import RolesScreen from './RolesScreen';
 import TenantConfigScreen from './TenantConfigScreen';
 
 const SCREEN_TITLE: Record<SidebarScreen, string> = {
@@ -19,6 +20,7 @@ const SCREEN_TITLE: Record<SidebarScreen, string> = {
   stores:       'Locales',
   salesHistory: 'Historial ventas',
   users:        'Usuarios',
+  roles:        'Roles',
   sales:        'Ventas',
   tenantConfig: 'Configuración',
 };
@@ -65,6 +67,7 @@ const AdminDashboard = () => {
           {/* Pantalla activa */}
           {activeScreen === 'dashboard'    && <DashboardScreen />}
           {activeScreen === 'users'        && <UsersScreen />}
+          {activeScreen === 'roles'        && <RolesScreen />}
           {activeScreen === 'operations'   && <AdminScreen />}
           {activeScreen === 'inventory'    && <InventoryScreen />}
           {activeScreen === 'stores'       && <StoresScreen />}
