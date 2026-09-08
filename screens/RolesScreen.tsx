@@ -236,8 +236,14 @@ export default function RolesScreen() {
 
               <AppText style={styles.fieldLabel} variant="label">Módulos habilitados</AppText>
               <View style={styles.moduleSelector}>
-                {MODULES.map(m => {
+                {/* CATALOG no tiene chip propio: InventoryScreen es una única pantalla
+                    que necesita INVENTORY (stock) y CATALOG (categorías/productos) juntos
+                    -- no hay forma de usar una sin la otra hoy. Marcar "Inventario" habilita
+                    ambos módulos en el backend para evitar Roles a medio andar (categorías
+                    tirando 403 aunque el stock cargue bien). */}
+                {MODULES.filter(m => m.value !== 'CATALOG').map(m => {
                   const active = form.permissions.includes(m.value);
+                  const linked = m.value === 'INVENTORY' ? ['INVENTORY', 'CATALOG'] : [m.value];
                   return (
                     <TouchableOpacity
                       key={m.value}
@@ -245,8 +251,8 @@ export default function RolesScreen() {
                       onPress={() => setForm({
                         ...form,
                         permissions: active
-                          ? form.permissions.filter(p => p !== m.value)
-                          : [...form.permissions, m.value],
+                          ? form.permissions.filter(p => !linked.includes(p))
+                          : [...new Set([...form.permissions, ...linked])],
                       })}
                     >
                       <Text style={[styles.moduleChipText, active && styles.moduleChipTextActive]}>{m.label}</Text>
