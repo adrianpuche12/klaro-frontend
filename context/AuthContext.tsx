@@ -151,10 +151,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshTokenRef   = useRef<string | null>(authState.refreshToken);
   // C-07: timer para refresh proactivo antes de que expire el token
   const refreshTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Bug encontrado en testing E2E: scheduleRefresh() se llama DENTRO de login(),
+  // antes de que el setAuthState() de esa misma función corra -- el closure de
+  // refreshAccessToken que scheduleRefresh captura queda con el authState.
+  // canManageUsers/permissions de ANTES del login (el default inicial: false/
+  // null). Con un access token de vida corta (ej. 300s en DEV), el refresh
+  // proactivo pisaba estos valores unos minutos después de cada login, dejando
+  // a cualquier staff con canManageUsers=true viendo el menú vacío de golpe.
+  // Mismo fix que refreshTokenRef: leer del ref, no del closure de authState.
+  const canManageUsersRef = useRef<boolean>(authState.canManageUsers);
+  const permissionsRef    = useRef<string[] | null>(authState.permissions);
 
   useEffect(() => {
     refreshTokenRef.current = authState.refreshToken;
   }, [authState.refreshToken]);
+
+  useEffect(() => {
+    canManageUsersRef.current = authState.canManageUsers;
+    permissionsRef.current = authState.permissions;
+  }, [authState.canManageUsers, authState.permissions]);
 
   const setAxiosAuthHeader = (token: string | null) => {
     if (token) {
@@ -222,9 +237,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // canManageUsers/permissions no se recalculan en cada refresh (evita una
       // llamada extra cada ~pocos minutos) -- se mantiene el último valor
       // conocido, refrescado recién en el próximo login completo. Root siempre
-      // true/null (acceso total), sin excepción.
-      const canManageUsers = isRoot ? true : authState.canManageUsers;
-      const permissions    = isRoot ? null : authState.permissions;
+      // true/null (acceso total), sin excepción. Se lee de los refs (no de
+      // authState directamente) porque scheduleRefresh() captura este closure
+      // ANTES de que el setAuthState() del login que lo programó se aplique --
+      // leer authState acá daría el valor previo al login (bug real encontrado
+      // en testing E2E, ver comentario en la declaración de los refs).
+      const canManageUsers = isRoot ? true : canManageUsersRef.current;
+      const permissions    = isRoot ? null : permissionsRef.current;
 
       await Storage.multiSet([
         ['accessToken', access_token],
