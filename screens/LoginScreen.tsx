@@ -80,9 +80,13 @@ const LoginScreen = () => {
           </AppText>
 
           <View style={styles.form}>
+            {/* Label fijo arriba del campo, no flotante: el label flotante de
+                Paper (mode="outlined" + label=) se superpone con el texto que
+                el navegador autocompleta (Chrome), ver bug reportado 10-Sep-2026.
+                Con label fijo + placeholder no hay nada que se pueda superponer. */}
+            <AppText variant="label" color={COLOR.ink2} style={styles.fieldLabel}>Usuario</AppText>
             <TextInput
               mode="outlined"
-              label="Usuario"
               value={username}
               onChangeText={setUsername}
               placeholder="nombre.apellido"
@@ -97,10 +101,10 @@ const LoginScreen = () => {
               left={<TextInput.Icon icon="account-outline" size={20} />}
             />
 
+            <AppText variant="label" color={COLOR.ink2} style={[styles.fieldLabel, styles.inputSpaced]}>Contraseña</AppText>
             <TextInput
               ref={passwordRef}
               mode="outlined"
-              label="Contraseña"
               value={password}
               onChangeText={setPassword}
               secureTextEntry={secureTextEntry}
@@ -111,7 +115,7 @@ const LoginScreen = () => {
               returnKeyType="go"
               outlineColor={error ? COLOR.expense : COLOR.border2}
               activeOutlineColor={error ? COLOR.expense : COLOR.brand}
-              style={[styles.input, styles.inputSpaced, isLoading && styles.inputDisabled]}
+              style={[styles.input, isLoading && styles.inputDisabled]}
               left={<TextInput.Icon icon="lock-outline" size={20} />}
               right={
                 <TextInput.Icon
@@ -173,6 +177,7 @@ const styles = StyleSheet.create({
 
   subtitleSpacing: { marginTop: SPACE.s1 },
   form: { marginTop: SPACE.s5 },
+  fieldLabel: { marginBottom: SPACE.s1 },
 
   input: { backgroundColor: COLOR.surface },
   inputSpaced: { marginTop: SPACE.s3 },
