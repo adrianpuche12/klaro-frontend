@@ -813,9 +813,10 @@ const styles = StyleSheet.create({
   qtyBtnText:     { fontSize: 16, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, lineHeight: 18 },
   qtyNum:         { width: 30, textAlign: 'center', fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
 
-  // Agregar button
-  addBtn:         { flex: 1, height: 30, backgroundColor: COLOR.brand, borderRadius: RADIUS.r2, justifyContent: 'center', alignItems: 'center' },
-  addBtnText:     { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
+  // Agregar button — tint + borde, no relleno sólido: "Confirmar venta" es la
+  // única acción de la pantalla que debe llevar el dorado sólido (regla 60-30-10).
+  addBtn:         { flex: 1, height: 30, backgroundColor: COLOR.brandTint, borderWidth: 1, borderColor: COLOR.brand, borderRadius: RADIUS.r2, justifyContent: 'center', alignItems: 'center' },
+  addBtnText:     { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.brandDeep },
 
   // Ticket
   ticketDesktop:  { width: 340, backgroundColor: COLOR.surface, borderLeftWidth: 1, borderLeftColor: COLOR.border },
