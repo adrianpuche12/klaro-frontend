@@ -579,7 +579,10 @@ const styles = StyleSheet.create({
 
   storeSelector:  { flexDirection: 'row', flexWrap: 'wrap', gap: SPACE.s2, marginBottom: SPACE.s3 },
   storeChip:      { paddingHorizontal: SPACE.s4, paddingVertical: SPACE.s2, borderRadius: RADIUS.full, backgroundColor: COLOR.bg, borderWidth: 1, borderColor: COLOR.border },
-  storeChipActive:{ backgroundColor: COLOR.brand, borderColor: COLOR.brandDark },
+  // Tint + borde, no relleno sólido: este chip también se usa en "Locales
+  // accesibles" (selección múltiple) -- varios podrían quedar activos a la
+  // vez, y el dorado sólido repetido rompería la regla 60-30-10.
+  storeChipActive:{ backgroundColor: COLOR.brandTint, borderWidth: 1.5, borderColor: COLOR.brand },
   storeChipText:  { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.semibold as any, color: COLOR.ink2 },
   storeChipTextActive: { color: COLOR.ink, fontWeight: FONT_WEIGHT.bold as any },
 
