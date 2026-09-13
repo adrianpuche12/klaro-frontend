@@ -103,16 +103,18 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     backgroundColor: COLOR.bg,
   },
+  // Fondo neutro, no dorado: visible en todas las pantallas del mobile,
+  // un fondo sólido en COLOR.brand rompería la regla 60-30-10.
   topbar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLOR.brand,
+    backgroundColor: COLOR.surface,
     paddingHorizontal: SPACE.s4,
     paddingVertical: SPACE.s3,
     height: CONTROL.appBarH,
     gap: SPACE.s3,
     borderBottomWidth: 1,
-    borderBottomColor: COLOR.brandDark,
+    borderBottomColor: COLOR.border,
   },
   menuBtn:     { padding: SPACE.s1 },
   topbarTitle: {

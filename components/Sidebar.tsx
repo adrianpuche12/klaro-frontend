@@ -349,13 +349,16 @@ const styles = StyleSheet.create({
     ...SHADOW.md,
   },
 
+  // Fondo neutro, no dorado: un header sólido en COLOR.brand cubre un área
+  // grande y siempre visible en cada pantalla -- rompe la regla 60-30-10. El
+  // logo (con borde brandDeep) ya aporta el acento dorado que necesita.
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: SPACE.s3,
-    backgroundColor: COLOR.brand,
+    backgroundColor: COLOR.surface,
     borderBottomWidth: 1,
-    borderBottomColor: COLOR.brandDark,
+    borderBottomColor: COLOR.border,
     gap: SPACE.s2,
     position: 'relative',
   },
