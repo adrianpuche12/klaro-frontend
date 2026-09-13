@@ -234,7 +234,8 @@ const styles = StyleSheet.create({
   content:         { flex: 1, flexDirection: 'column' },
 
   sidebar:         { width: 220, backgroundColor: COLOR.surface, borderRightWidth: 1, borderRightColor: COLOR.border, flexDirection: 'column' },
-  sidebarHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: SPACE.s3, borderBottomWidth: 1, borderBottomColor: COLOR.brandDark, backgroundColor: COLOR.brand },
+  // Fondo neutro, no dorado (regla 60-30-10) -- ver mismo criterio en Sidebar.tsx/AdminDashboard.tsx
+  sidebarHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: SPACE.s3, borderBottomWidth: 1, borderBottomColor: COLOR.border, backgroundColor: COLOR.surface },
   brandText:       { fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.black as any, color: COLOR.ink },
   brandSub:        { fontSize: FONT_SIZE.caption, color: COLOR.inkMute, fontWeight: FONT_WEIGHT.semibold as any, marginTop: 2 },
 
@@ -248,7 +249,7 @@ const styles = StyleSheet.create({
   logoutBtn:       { flexDirection: 'row', alignItems: 'center', gap: SPACE.s2, padding: SPACE.s4, borderTopWidth: 1, borderTopColor: COLOR.border },
   logoutText:      { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.semibold as any, color: COLOR.expense },
 
-  topbar:          { flexDirection: 'row', alignItems: 'center', backgroundColor: COLOR.brand, paddingHorizontal: SPACE.s3, paddingVertical: SPACE.s3, gap: SPACE.s3 },
+  topbar:          { flexDirection: 'row', alignItems: 'center', backgroundColor: COLOR.surface, borderBottomWidth: 1, borderBottomColor: COLOR.border, paddingHorizontal: SPACE.s3, paddingVertical: SPACE.s3, gap: SPACE.s3 },
   menuBtn:         { padding: SPACE.s1 },
   topbarTitle:     { fontSize: FONT_SIZE.h2, fontWeight: FONT_WEIGHT.black as any, color: COLOR.ink },
 
