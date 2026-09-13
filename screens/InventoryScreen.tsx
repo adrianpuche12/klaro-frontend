@@ -1012,8 +1012,11 @@ const styles = StyleSheet.create({
   stockNum:           { fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any },
   stockMin:           { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.semibold as any },
   rowActions:         { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  adjustBtn:          { backgroundColor: COLOR.brand, borderRadius: RADIUS.r1, paddingHorizontal: SPACE.s2, paddingVertical: 6, marginRight: SPACE.s1 },
-  adjustBtnText:      { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
+  // Tint + borde, no relleno sólido: este botón está "siempre visible" en cada
+  // fila de la tabla, así que el dorado sólido rompería la regla 60-30-10 al
+  // repetirse en toda la lista (mismo criterio que Roles/POS).
+  adjustBtn:          { backgroundColor: COLOR.brandTint, borderWidth: 1, borderColor: COLOR.brand, borderRadius: RADIUS.r1, paddingHorizontal: SPACE.s2, paddingVertical: 6, marginRight: SPACE.s1 },
+  adjustBtnText:      { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.brandDeep },
   actionIcon:         { margin: 0 },
 
   // View tabs (Stock / Historial)
