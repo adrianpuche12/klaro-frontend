@@ -5,6 +5,7 @@ import {
 import { TextInput, Button, HelperText, Divider } from 'react-native-paper';
 import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
+import { TIMEZONES } from '../constants/timezones';
 import { COLOR, SPACE, FONT_SIZE, FONT_WEIGHT, RADIUS, SHADOW } from '../theme';
 
 interface TenantConfig {
@@ -15,20 +16,6 @@ interface TenantConfig {
   phone: string;
 }
 
-const TIMEZONES = [
-  'America/Tegucigalpa',
-  'America/Guatemala',
-  'America/El_Salvador',
-  'America/Managua',
-  'America/Costa_Rica',
-  'America/Panama',
-  'America/Bogota',
-  'America/Lima',
-  'America/Santiago',
-  'America/Argentina/Buenos_Aires',
-  'America/Mexico_City',
-  'America/New_York',
-];
 
 const TenantConfigScreen = () => {
   const [config, setConfig]     = useState<TenantConfig>({
