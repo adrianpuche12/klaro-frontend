@@ -8,6 +8,11 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import { useAuth } from '../context/AuthContext';
 import { useUIPreferences } from '../context/UIPreferencesContext';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, BREAKPOINT } from '../theme';
+import { menuFor, SidebarScreen } from '../config/navConfig';
+import { BRAND_NAME } from '../constants/brand';
+import ConfirmDialog from './ConfirmDialog';
+
+export type { SidebarScreen } from '../config/navConfig';
 
 // Tooltip custom liviano — no requiere Paper Provider
 const SidebarTooltip = ({ label, children }: { label: string; children: React.ReactNode }) => {
@@ -55,69 +60,19 @@ const SIDEBAR_W_EXPANDED  = 260;
 const SIDEBAR_W_COLLAPSED = 88;
 const ANIM_DURATION       = 250;
 
-export type SidebarScreen =
-  | 'dashboard' | 'operations' | 'finance' | 'inventory' | 'stores'
-  | 'sales' | 'salesHistory' | 'users' | 'roles' | 'tenantConfig';
-
-interface MenuItem { key: SidebarScreen; label: string; icon: string }
-
-// Mapea cada ítem al módulo (o módulos, cuando una pantalla agrupa más de
-// uno -- ej. Inventario cubre INVENTORY+CATALOG) que lo habilita (SPRINT-09/
-// SPRINT-14). Mismo catálogo que PermissionModule en el backend / MODULES en
-// constants/permissionModules.ts. Ítems sin entrada acá (users/roles/stores/
-// tenantConfig) no son módulos: se gatean por canManageUsers o son exclusivos
-// de root, que nunca pasa por este filtro.
-const MODULE_MAP: Partial<Record<SidebarScreen, string[]>> = {
-  dashboard:    ['DASHBOARD'],
-  sales:        ['POS'],
-  salesHistory: ['SALES_HISTORY'],
-  inventory:    ['INVENTORY', 'CATALOG'],
-  finance:      ['TRANSACTIONS', 'SALARY_PAYMENTS', 'SUPPLIER_PAYMENTS'],
-  operations:   ['OPERATIONS'],
-};
-
-/** Filtra el menú según los módulos del Role asignado. permissions === null
- * es la excepción legacy (ver PermissionGuard.isLegacy en el backend): acceso
- * total, no "cero módulos". */
-function filterMenuByPermissions(menu: MenuItem[], permissions: string[] | null): MenuItem[] {
-  if (permissions === null) return menu;
-  return menu.filter(item => {
-    const required = MODULE_MAP[item.key];
-    if (!required) return true;
-    return required.some(m => permissions.includes(m));
-  });
-}
-
-// ROOT — acceso completo + configuración del tenant
-const MENU_ROOT: MenuItem[] = [
-  { key: 'dashboard',    label: 'Dashboard',       icon: 'view-dashboard-outline' },
-  { key: 'sales',        label: 'Ventas',           icon: 'cart-outline' },
-  { key: 'salesHistory', label: 'Historial ventas', icon: 'receipt-text-outline' },
-  { key: 'inventory',    label: 'Inventario',       icon: 'package-variant' },
-  { key: 'finance',      label: 'Finanzas',         icon: 'cash-multiple' },
-  { key: 'operations',   label: 'Operaciones',      icon: 'clipboard-text-outline' },
-  { key: 'users',        label: 'Usuarios',         icon: 'account-multiple-outline' },
-  { key: 'roles',        label: 'Roles',            icon: 'badge-account-outline' },
-  { key: 'stores',       label: 'Locales',          icon: 'store-outline' },
-  { key: 'tenantConfig', label: 'Configuración',    icon: 'tune-variant' },
-];
-
-// ADMIN — gestión operativa sin configuración de locales ni tenant. Filtrado
-// según los módulos que el Role del usuario tiene marcados (ver filterMenuByPermissions).
-const MENU_ADMIN: MenuItem[] = [
-  { key: 'dashboard',    label: 'Dashboard',       icon: 'view-dashboard-outline' },
-  { key: 'sales',        label: 'Ventas',           icon: 'cart-outline' },
-  { key: 'salesHistory', label: 'Historial ventas', icon: 'receipt-text-outline' },
-  { key: 'inventory',    label: 'Inventario',       icon: 'package-variant' },
-  { key: 'finance',      label: 'Finanzas',         icon: 'cash-multiple' },
-  { key: 'operations',   label: 'Operaciones',      icon: 'clipboard-text-outline' },
-  { key: 'users',        label: 'Usuarios',         icon: 'account-multiple-outline' },
-];
-
-const MENU_USER: MenuItem[] = [
-  { key: 'sales',        label: 'Ventas',     icon: 'cart-outline' },
-  { key: 'inventory',    label: 'Inventario', icon: 'package-variant' },
-];
+/** N-03: confirmar antes de cerrar sesión (un toque accidental sacaba al usuario). */
+const LogoutConfirm = ({ visible, onConfirm, onCancel }: {
+  visible: boolean; onConfirm: () => void; onCancel: () => void;
+}) => (
+  <ConfirmDialog
+    visible={visible}
+    title="¿Cerrar sesión?"
+    message="Se va a cerrar tu sesión en este dispositivo."
+    confirmLabel="Cerrar sesión"
+    onConfirm={onConfirm}
+    onCancel={onCancel}
+  />
+);
 
 // ─── Sidebar desktop colapsable ───────────────────────────────────────────────
 
@@ -127,11 +82,9 @@ const SidebarDesktop = ({ active, onSelect }: {
 }) => {
   const { logout, roles, canManageUsers, permissions, userName } = useAuth();
   const { sidebarCollapsed, toggleSidebar } = useUIPreferences();
-  const isRoot  = roles.includes('root');
-  // SPRINT-14: Keycloak ya no distingue admin/user -- canManageUsers viene del
-  // Role asignado en la app. El menú de un staff privilegiado se filtra además
-  // por los módulos que ese Role tiene marcados (root ve todo, sin filtrar).
-  const menu = isRoot ? MENU_ROOT : canManageUsers ? filterMenuByPermissions(MENU_ADMIN, permissions) : MENU_USER;
+  // Menú según rol/Role asignado: misma regla que valida AdminDashboard (config/navConfig.ts).
+  const menu = menuFor({ roles, canManageUsers, permissions });
+  const [askLogout, setAskLogout] = useState(false);
 
   // Animación de ancho
   const animW = useRef(new Animated.Value(
@@ -170,11 +123,17 @@ const SidebarDesktop = ({ active, onSelect }: {
         />
         {!sidebarCollapsed && (
           <View style={styles.brandText}>
-            <Text style={styles.brandName} numberOfLines={1}>Belopia</Text>
+            <Text style={styles.brandName} numberOfLines={1}>{BRAND_NAME}</Text>
             <Text style={styles.brandSub}>{userName ?? 'Sistema de gestión'}</Text>
           </View>
         )}
-        <TouchableOpacity style={styles.togglePin} onPress={toggleSidebar} activeOpacity={0.8}>
+        <TouchableOpacity
+          style={styles.togglePin}
+          onPress={toggleSidebar}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel={sidebarCollapsed ? 'Expandir menú' : 'Contraer menú'}
+        >
           <MaterialCommunityIcons
             name={sidebarCollapsed ? 'chevron-right' : 'chevron-left'}
             size={16}
@@ -189,19 +148,23 @@ const SidebarDesktop = ({ active, onSelect }: {
           const isActive = active === item.key;
           if (sidebarCollapsed) {
             return (
-              <TouchableOpacity
-                key={item.key}
-                style={[styles.menuItemCollapsed, isActive && styles.menuItemActive]}
-                onPress={() => onSelect(item.key)}
-                activeOpacity={0.7}
-              >
-                <MaterialCommunityIcons
-                  name={item.icon}
-                  size={20}
-                  color={isActive ? COLOR.brandDeep : COLOR.ink2}
-                />
-                {isActive && <View style={styles.activeBar} />}
-              </TouchableOpacity>
+              <SidebarTooltip key={item.key} label={item.label}>
+                <TouchableOpacity
+                  style={[styles.menuItemCollapsed, isActive && styles.menuItemActive]}
+                  onPress={() => onSelect(item.key)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={item.label}
+                  accessibilityState={{ selected: isActive }}
+                >
+                  <MaterialCommunityIcons
+                    name={item.icon}
+                    size={20}
+                    color={isActive ? COLOR.brandDeep : COLOR.ink2}
+                  />
+                  {isActive && <View style={styles.activeBar} />}
+                </TouchableOpacity>
+              </SidebarTooltip>
             );
           }
           return (
@@ -210,6 +173,8 @@ const SidebarDesktop = ({ active, onSelect }: {
               style={[styles.menuItem, isActive && styles.menuItemActive]}
               onPress={() => onSelect(item.key)}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isActive }}
             >
               <MaterialCommunityIcons
                 name={item.icon}
@@ -228,14 +193,21 @@ const SidebarDesktop = ({ active, onSelect }: {
       {/* ── Logout ── */}
       <TouchableOpacity
         style={[styles.logoutBtn, sidebarCollapsed && styles.logoutBtnCollapsed]}
-        onPress={logout}
+        onPress={() => setAskLogout(true)}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel="Cerrar sesión"
       >
         <MaterialCommunityIcons name="logout" size={18} color={COLOR.expense} />
         {!sidebarCollapsed && (
           <Text style={styles.logoutLabel}>Cerrar sesión</Text>
         )}
       </TouchableOpacity>
+      <LogoutConfirm
+        visible={askLogout}
+        onConfirm={() => { setAskLogout(false); logout(); }}
+        onCancel={() => setAskLogout(false)}
+      />
     </Animated.View>
   );
 };
@@ -249,14 +221,12 @@ const SidebarMobile = ({ active, onSelect, visible, onClose }: {
   onClose: () => void;
 }) => {
   const { logout, roles, canManageUsers, permissions, userName } = useAuth();
-  const isRoot  = roles.includes('root');
-  // SPRINT-14: Keycloak ya no distingue admin/user -- canManageUsers viene del
-  // Role asignado en la app. El menú de un staff privilegiado se filtra además
-  // por los módulos que ese Role tiene marcados (root ve todo, sin filtrar).
-  const menu = isRoot ? MENU_ROOT : canManageUsers ? filterMenuByPermissions(MENU_ADMIN, permissions) : MENU_USER;
+  // Menú según rol/Role asignado: misma regla que valida AdminDashboard (config/navConfig.ts).
+  const menu = menuFor({ roles, canManageUsers, permissions });
+  const [askLogout, setAskLogout] = useState(false);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <View style={[styles.sidebar, { width: SIDEBAR_W_EXPANDED }]}>
 
@@ -266,10 +236,10 @@ const SidebarMobile = ({ active, onSelect, visible, onClose }: {
               style={styles.logo}
             />
             <View style={styles.brandText}>
-              <Text style={styles.brandName}>Belopia</Text>
+              <Text style={styles.brandName}>{BRAND_NAME}</Text>
               <Text style={styles.brandSub}>{userName ?? 'Sistema de gestión'}</Text>
             </View>
-            <IconButton icon="close" size={20} iconColor={COLOR.ink2} onPress={onClose} style={{ margin: 0 }} />
+            <IconButton icon="close" size={20} iconColor={COLOR.ink2} onPress={onClose} style={{ margin: 0 }} accessibilityLabel="Cerrar menú" />
           </View>
 
           <ScrollView style={styles.menuScroll} showsVerticalScrollIndicator={false}>
@@ -281,6 +251,8 @@ const SidebarMobile = ({ active, onSelect, visible, onClose }: {
                   style={[styles.menuItem, isActive && styles.menuItemActive]}
                   onPress={() => { onSelect(item.key); onClose(); }}
                   activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isActive }}
                 >
                   <MaterialCommunityIcons
                     name={item.icon}
@@ -296,10 +268,20 @@ const SidebarMobile = ({ active, onSelect, visible, onClose }: {
             })}
           </ScrollView>
 
-          <TouchableOpacity style={styles.logoutBtn} onPress={logout} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={styles.logoutBtn}
+            onPress={() => setAskLogout(true)}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+          >
             <MaterialCommunityIcons name="logout" size={18} color={COLOR.expense} />
             <Text style={styles.logoutLabel}>Cerrar sesión</Text>
           </TouchableOpacity>
+          <LogoutConfirm
+            visible={askLogout}
+            onConfirm={() => { setAskLogout(false); onClose(); logout(); }}
+            onCancel={() => setAskLogout(false)}
+          />
         </View>
         <TouchableOpacity style={styles.overlayBg} onPress={onClose} />
       </View>
@@ -370,7 +352,7 @@ const styles = StyleSheet.create({
     borderColor: COLOR.brandDeep,
     flexShrink: 0,
   },
-  brandText: { flex: 1, overflow: 'hidden' },
+  brandText: { flex: 1, overflow: 'hidden', paddingRight: 32 },
   brandName: {
     fontSize: FONT_SIZE.label,
     fontWeight: FONT_WEIGHT.bold as any,
@@ -387,6 +369,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 6,
     top: '50%' as any,
+    marginTop: -13, // mitad del alto: centrado real (N-06)
     width: 26,
     height: 26,
     borderRadius: RADIUS.full,

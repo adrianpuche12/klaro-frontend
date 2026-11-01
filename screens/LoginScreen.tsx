@@ -6,8 +6,16 @@ import {
 import { TextInput, Button } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { COLOR, SPACE, FONT_SIZE, FONT_WEIGHT, RADIUS, CONTROL, SHADOW } from '../theme';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, AuthError } from '../context/AuthContext';
 import AppText from '../components/ui/AppText';
+
+/** L-01: un mensaje por causa. Antes, con Keycloak caído o sin internet, decía "contraseña incorrecta". */
+const LOGIN_ERROR: Record<string, string> = {
+  credentials: 'Usuario o contraseña incorrectos',
+  network:     'No hay conexión con el servidor. Revisá internet e intentá de nuevo.',
+  server:      'El servidor no responde, intentá más tarde',
+  unknown:     'No se pudo iniciar sesión. Intentá de nuevo.',
+};
 
 const LoginScreen = () => {
   const [username, setUsername]       = useState('');
@@ -29,20 +37,17 @@ const LoginScreen = () => {
   }, [error, errOpacity]);
 
   const handleLogin = async () => {
-    if (!username || !password) {
+    if (!username.trim() || !password) {
       setError('Por favor completá todos los campos');
       return;
     }
     setIsLoading(true);
     setError('');
     try {
-      const success = await login(username.trim(), password.trim());
-      if (!success) setError('Usuario o contraseña incorrectos');
-    } catch (err: any) {
-      const status = err?.response?.status;
-      if (status === 401 || status === 403) setError('Usuario o contraseña incorrectos');
-      else if (status >= 500) setError('El servidor no responde, intentá más tarde');
-      else setError('Error al iniciar sesión');
+      // L-02: la contraseña NO se recorta (puede empezar o terminar con espacio).
+      await login(username.trim(), password);
+    } catch (err) {
+      setError(LOGIN_ERROR[err instanceof AuthError ? err.code : 'unknown']);
     } finally {
       setIsLoading(false);
     }
@@ -90,6 +95,9 @@ const LoginScreen = () => {
               value={username}
               onChangeText={setUsername}
               placeholder="nombre.apellido"
+              autoComplete="username"
+              textContentType="username"
+              accessibilityLabel="Usuario"
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="next"
@@ -108,6 +116,9 @@ const LoginScreen = () => {
               value={password}
               onChangeText={setPassword}
               secureTextEntry={secureTextEntry}
+              autoComplete="current-password"
+              textContentType="password"
+              accessibilityLabel="Contraseña"
               autoCapitalize="none"
               autoCorrect={false}
               editable={!isLoading}
@@ -122,6 +133,7 @@ const LoginScreen = () => {
                   icon={secureTextEntry ? 'eye-outline' : 'eye-off-outline'}
                   size={20}
                   onPress={() => setSecure(v => !v)}
+                  accessibilityLabel={secureTextEntry ? 'Mostrar contraseña' : 'Ocultar contraseña'}
                 />
               }
             />
