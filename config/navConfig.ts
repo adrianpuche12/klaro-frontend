@@ -50,7 +50,7 @@ function filterMenuByPermissions(menu: MenuItem[], permissions: string[] | null)
 export const MENU_ROOT: MenuItem[] = [
   { key: 'dashboard',    label: 'Dashboard',        icon: 'view-dashboard-outline' },
   { key: 'sales',        label: 'Ventas',           icon: 'cart-outline' },
-  { key: 'salesHistory', label: 'Historial ventas', icon: 'receipt-text-outline' },
+  { key: 'salesHistory', label: 'Historial ventas', icon: 'receipt' },
   { key: 'inventory',    label: 'Inventario',       icon: 'package-variant' },
   { key: 'finance',      label: 'Finanzas',         icon: 'cash-multiple' },
   { key: 'operations',   label: 'Operaciones',      icon: 'clipboard-text-outline' },

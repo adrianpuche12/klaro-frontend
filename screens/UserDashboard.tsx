@@ -27,7 +27,7 @@ const MENU: { key: UserScreen; label: string; icon: string; modules: string[] }[
   { key: 'dashboard',    label: 'Dashboard',   icon: 'view-dashboard-outline',    modules: ['DASHBOARD'] },
   { key: 'sales',        label: 'Ventas',      icon: 'cart-outline',              modules: ['POS'] },
   { key: 'inventory',    label: 'Inventario',  icon: 'package-variant',           modules: ['INVENTORY', 'CATALOG'] },
-  { key: 'salesHistory', label: 'Mis ventas',  icon: 'receipt-text-outline',      modules: ['SALES_HISTORY'] },
+  { key: 'salesHistory', label: 'Mis ventas',  icon: 'receipt',      modules: ['SALES_HISTORY'] },
   { key: 'finance',      label: 'Finanzas',    icon: 'cash-multiple',             modules: ['TRANSACTIONS', 'SALARY_PAYMENTS', 'SUPPLIER_PAYMENTS'] },
   { key: 'operaciones',  label: 'Operaciones', icon: 'clipboard-text-outline',    modules: ['OPERATIONS'] },
 ];
