@@ -681,7 +681,7 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
                       {/* Header de la venta */}
                       <View style={styles.saleCardHead}>
                         <Text style={styles.saleCardTime}>
-                          {new Date(sale.createdAt).toLocaleTimeString(APP_LOCALE, { hour: '2-digit', minute: '2-digit' })}
+                          {formatTime(sale.createdAt)}
                         </Text>
                         <Text style={styles.saleCardTotal}>{money(sale.total)}</Text>
                         <TouchableOpacity

@@ -14,7 +14,7 @@ import { useAuth } from '../context/AuthContext';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, CONTROL } from '../theme';
 import { stockColor } from '../utils/stockStatus';
 import { useMoney } from '../context/TenantConfigContext';
-import { APP_LOCALE } from '../utils/format';
+import { APP_LOCALE, formatTime, tzOptions } from '../utils/format';
 import { parseQty, parseCount, parseMoney } from '../utils/parseInput';
 import { descendantIds, findCat, countProductsDeep } from '../utils/categories';
 
@@ -648,8 +648,8 @@ const InventoryScreen = () => {
         {movSign(m) > 0 ? '+' : '-'}{Math.abs(m.quantity)}
       </Text>
       <Text style={styles.movDate}>
-        {new Date(m.createdAt).toLocaleDateString(APP_LOCALE, { day: '2-digit', month: '2-digit' })}{'\n'}
-        {new Date(m.createdAt).toLocaleTimeString(APP_LOCALE, { hour: '2-digit', minute: '2-digit' })}
+        {new Date(m.createdAt).toLocaleDateString(APP_LOCALE, { day: '2-digit', month: '2-digit', ...tzOptions() })}{'\n'}
+        {formatTime(m.createdAt)}
       </Text>
     </View>
   );

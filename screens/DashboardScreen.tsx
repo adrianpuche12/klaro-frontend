@@ -8,7 +8,7 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, BREAKPOINT } from '../theme';
-import { formatDate, formatTime } from '../utils/format';
+import { formatDate, formatTime, isTodayInCompany } from '../utils/format';
 import { useMoney } from '../context/TenantConfigContext';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -48,7 +48,8 @@ const STALE_SHIFT_HOURS = 12;
 const isStaleShift = (iso: string | null) =>
   !!iso && Date.now() - new Date(iso).getTime() > STALE_SHIFT_HOURS * 3_600_000;
 
-const isSameDay = (iso: string) => new Date(iso).toDateString() === new Date().toDateString();
+// "Hoy" según la zona horaria de la empresa, no la del dispositivo.
+const isSameDay = (iso: string) => isTodayInCompany(iso);
 
 /** D-05: hora sola si el turno es de hoy; fecha + hora si viene de otro día. */
 const shiftSince = (iso: string) =>
