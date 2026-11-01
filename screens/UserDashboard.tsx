@@ -246,7 +246,7 @@ const UserContent = () => {
               )
             )}
             {active === 'inventory'    && <InventoryScreen />}
-            {active === 'salesHistory' && <SalesHistoryScreen />}
+            {active === 'salesHistory' && <SalesHistoryScreen mine store={assignedStore} />}
             {active === 'finance'      && <AdminScreen />}
             {active === 'operaciones'  && <DynamicFormScreen />}
           </>
