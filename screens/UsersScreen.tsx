@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Modal, useWindowDimensions,
+  ActivityIndicator, Modal, useWindowDimensions, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { Button, TextInput, Snackbar, IconButton } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -36,6 +36,8 @@ interface UserForm {
   fullName: string;
   username: string;
   password: string;
+  /** US-04: confirmación de la contraseña (no se envía al backend). */
+  password2: string;
   storeId: string;
   /** Role de la app (SPRINT-14) -- reemplaza el toggle user/admin de Keycloak
    * (que ahora es siempre "staff") y el businessRole libre de SPRINT-09. */
@@ -44,11 +46,34 @@ interface UserForm {
 }
 
 const EMPTY_FORM: UserForm = {
-  fullName: '', username: '', password: '', storeId: '',
+  fullName: '', username: '', password: '', password2: '', storeId: '',
   roleId: '', storeIds: [],
 };
 
-const statusLabel = (s: string) => s === 'ACTIVE' ? 'Activo' : s === 'SUSPENDED' ? 'Suspendido' : 'Eliminado';
+/**
+ * US-04 (rev. 06): validación mínima de contraseña en el frontend. La política real la
+ * aplica Keycloak al crear/resetear; esto solo evita las obvias ("1", "123") y los errores
+ * de tipeo. Nunca se muestra ni se loguea la contraseña.
+ */
+const MIN_PASSWORD = 8;
+const passwordProblem = (p: string, p2: string): string | null => {
+  if (p.length < MIN_PASSWORD) return `La contraseña debe tener al menos ${MIN_PASSWORD} caracteres`;
+  if (p !== p2) return 'Las contraseñas no coinciden';
+  return null;
+};
+
+/** Mensaje del backend si lo hay; 403 = la cascada de niveles lo rechazó; sin respuesta = conexión. */
+const apiError = (e: any, fallback: string): string => {
+  if (e?.response?.status === 403) return 'No tenés permiso para gestionar este usuario';
+  return e?.response?.data?.error ?? (e?.response ? fallback : 'Sin conexión con el servidor');
+};
+
+/** US-01: sin Role asignado = acceso total (cuenta del dueño o legacy). Solo root la gestiona. */
+const roleLabel = (u: AppUser) => u.roleName || 'Acceso total';
+
+// US-06: un estado desconocido se muestra tal cual, no como "Eliminado".
+const statusLabel = (s: string) =>
+  s === 'ACTIVE' ? 'Activo' : s === 'SUSPENDED' ? 'Suspendido' : s === 'DELETED' ? 'Eliminado' : s;
 const statusColor = (s: string) => s === 'ACTIVE' ? COLOR.income : s === 'SUSPENDED' ? COLOR.expense : COLOR.inkDisabled;
 
 // ─── UsersScreen ──────────────────────────────────────────────────────────────
@@ -57,14 +82,19 @@ export default function UsersScreen() {
   const API = REACT_APP_API_URL;
   const { width } = useWindowDimensions();
   const isDesktop = width >= BREAKPOINT.desktop;
-  const { roles } = useAuth();
+  const { roles, userName } = useAuth();
   const isRoot = roles.includes('root');
 
   const [users, setUsers]           = useState<AppUser[]>([]);
   const [stores, setStores]         = useState<Store[]>([]);
   const [rolesList, setRolesList]   = useState<RoleOption[]>([]);
+  const [rolesError, setRolesError] = useState(false);
   const [loading, setLoading]       = useState(false);
+  // US-13: un error de carga no es lo mismo que "no hay usuarios".
+  const [usersError, setUsersError] = useState('');
   const [snackbar, setSnackbar]     = useState('');
+  // US-07: búsqueda por nombre, usuario o local.
+  const [query, setQuery]           = useState('');
 
   // Modal crear usuario
   const [createModal, setCreateModal] = useState(false);
@@ -80,6 +110,7 @@ export default function UsersScreen() {
   // Modal reset password
   const [resetModal, setResetModal]   = useState<AppUser | null>(null);
   const [newPassword, setNewPassword] = useState('');
+  const [newPassword2, setNewPassword2] = useState('');
   const [resetting, setResetting]     = useState(false);
   const [showNewPwd, setShowNewPwd]   = useState(false);
 
@@ -98,31 +129,67 @@ export default function UsersScreen() {
 
   const loadAll = useCallback(async () => {
     setLoading(true);
+    setUsersError('');
     // Carga independiente: si una falla, las demás igual cargan para el formulario
     const [usersRes, storesRes, rolesRes] = await Promise.allSettled([
       axios.get<AppUser[]>(`${API}/api/v2/users`),
       axios.get<Store[]>(`${API}/api/v2/stores/active`),
       axios.get<RoleOption[]>(`${API}/api/v2/roles`),
     ]);
-    if (usersRes.status === 'fulfilled')  setUsers(usersRes.value.data);
-    else setSnackbar('Error al cargar usuarios');
+    if (usersRes.status === 'fulfilled') setUsers(usersRes.value.data);
+    else setUsersError(apiError(usersRes.reason, 'No se pudieron cargar los usuarios'));
     if (storesRes.status === 'fulfilled') setStores(storesRes.value.data);
     else setSnackbar('Error al cargar locales');
-    if (rolesRes.status === 'fulfilled')  setRolesList(rolesRes.value.data);
-    // Si roles falla, no bloqueamos la pantalla -- el picker queda vacío
+    if (rolesRes.status === 'fulfilled') { setRolesList(rolesRes.value.data); setRolesError(false); }
+    else { setRolesList([]); setRolesError(true); }
+    // Si roles falla, no bloqueamos la pantalla -- el picker queda vacío y,
+    // para un no-root, las acciones quedan ocultas (ver canManage).
     setLoading(false);
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  // ── US-01: sobre quién puede actuar el usuario logueado ───────────────────
+  //
+  // Mismo criterio que el backend (RoleService.assertCanManage, cascada de SPRINT-14):
+  //  - nadie actúa sobre sí mismo desde acá (ni suspenderse, ni borrarse, ni resetearse);
+  //  - root actúa sobre cualquiera;
+  //  - un no-root solo sobre usuarios cuyo Role tenga nivel estrictamente mayor al suyo.
+  //    GET /api/v2/roles ya devuelve, para un no-root, SOLO esos Roles: si el Role del
+  //    usuario está en la lista, es gestionable. Sin Role (acceso total) = solo root.
+  // Si los Roles no cargaron, un no-root no ve acciones (falla cerrado).
+  const manageableRoleIds = useMemo(() => new Set(rolesList.map(r => r.id)), [rolesList]);
+  const isSelf = (u: AppUser) => !!userName && u.username.toLowerCase() === userName.toLowerCase();
+  const canManage = (u: AppUser) => {
+    if (isSelf(u)) return false;
+    if (isRoot) return true;
+    return u.roleId != null && manageableRoleIds.has(u.roleId);
+  };
+
+  const visibleUsers = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter(u =>
+      u.fullName.toLowerCase().includes(q)
+      || u.username.toLowerCase().includes(q)
+      || (u.storeName ?? '').toLowerCase().includes(q));
+  }, [users, query]);
+
+  const closeCreate = () => { setCreateModal(false); setForm(EMPTY_FORM); setShowPassword(false); };
+  const closeReset  = () => { setResetModal(null); setNewPassword(''); setNewPassword2(''); setShowNewPwd(false); };
+
   // ── Crear usuario ──────────────────────────────────────────────────────────
 
   const handleCreate = async () => {
+    // US-03 / G-01: un segundo toque mientras guarda no crea otro usuario.
+    if (saving) return;
     // storeId (local principal) ya no es obligatorio — un perfil de solo lectura
     // (contador, socio) puede no tener local principal fijo, ver storeIds.
     if (!form.fullName.trim() || !form.username.trim() || !form.password) {
       setSnackbar('Completá todos los campos'); return;
     }
+    const pwdProblem = passwordProblem(form.password, form.password2); // US-04
+    if (pwdProblem) { setSnackbar(pwdProblem); return; }
     setSaving(true);
     try {
       await axios.post(`${API}/api/v2/users`, {
@@ -134,11 +201,10 @@ export default function UsersScreen() {
         storeIds: form.storeIds.map(Number),
       });
       setSnackbar('Usuario creado correctamente');
-      setCreateModal(false);
-      setForm(EMPTY_FORM);
+      closeCreate();
       loadAll();
     } catch (e: any) {
-      setSnackbar(e.response?.data?.error || 'Error al crear usuario');
+      setSnackbar(apiError(e, 'Error al crear usuario'));
     } finally { setSaving(false); }
   };
 
@@ -153,8 +219,7 @@ export default function UsersScreen() {
           await axios.put(`${API}/api/v2/users/${user.id}/suspend`);
           setSnackbar(`${user.fullName} suspendido`);
           loadAll();
-        } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error'); }
-        finally { setConfirmDlg(null); }
+        } catch (e: any) { setSnackbar(apiError(e, 'No se pudo suspender el usuario')); }
       }
     );
   };
@@ -168,8 +233,7 @@ export default function UsersScreen() {
           await axios.put(`${API}/api/v2/users/${user.id}/activate`);
           setSnackbar(`${user.fullName} activado`);
           loadAll();
-        } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error'); }
-        finally { setConfirmDlg(null); }
+        } catch (e: any) { setSnackbar(apiError(e, 'No se pudo activar el usuario')); }
       }
     );
   };
@@ -177,6 +241,7 @@ export default function UsersScreen() {
   // ── Reasignar local ────────────────────────────────────────────────────────
 
   const handleReassign = async () => {
+    if (reassigning) return; // G-01
     if (!reassignModal || !reassignStoreId) { setSnackbar('Seleccioná un local'); return; }
     setReassigning(true);
     try {
@@ -185,21 +250,23 @@ export default function UsersScreen() {
       setReassignModal(null);
       setReassignStoreId('');
       loadAll();
-    } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error'); }
+    } catch (e: any) { setSnackbar(apiError(e, 'No se pudo reasignar el local')); }
     finally { setReassigning(false); }
   };
 
   // ── Reset password ─────────────────────────────────────────────────────────
 
   const handleResetPassword = async () => {
+    if (resetting) return; // G-01
     if (!resetModal || !newPassword) { setSnackbar('Ingresá la nueva contraseña'); return; }
+    const pwdProblem = passwordProblem(newPassword, newPassword2); // US-04
+    if (pwdProblem) { setSnackbar(pwdProblem); return; }
     setResetting(true);
     try {
       await axios.put(`${API}/api/v2/users/${resetModal.id}/reset-password`, { password: newPassword });
       setSnackbar('Contraseña actualizada correctamente');
-      setResetModal(null);
-      setNewPassword('');
-    } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error'); }
+      closeReset();
+    } catch (e: any) { setSnackbar(apiError(e, 'No se pudo cambiar la contraseña')); }
     finally { setResetting(false); }
   };
 
@@ -212,7 +279,7 @@ export default function UsersScreen() {
   };
 
   const handleSaveAccess = async () => {
-    if (!accessModal) return;
+    if (!accessModal || savingAccess) return; // G-01
     setSavingAccess(true);
     try {
       await axios.put(`${API}/api/v2/users/${accessModal.id}/role`, {
@@ -225,7 +292,7 @@ export default function UsersScreen() {
       setAccessModal(null);
       loadAll();
     } catch (e: any) {
-      setSnackbar(e.response?.data?.error || 'Error al actualizar permisos');
+      setSnackbar(apiError(e, 'Error al actualizar permisos'));
     } finally { setSavingAccess(false); }
   };
 
@@ -240,8 +307,10 @@ export default function UsersScreen() {
           await axios.delete(`${API}/api/v2/users/${user.id}`);
           setSnackbar('Usuario eliminado');
           loadAll();
-        } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error al eliminar'); }
-        finally { setConfirmDlg(null); }
+        } catch (e: any) {
+          // US-11: sugerir la alternativa en vez de un "Error" genérico.
+          setSnackbar(apiError(e, 'No se pudo eliminar el usuario. Podés suspenderlo en su lugar.'));
+        }
       }
     );
   };
@@ -262,9 +331,39 @@ export default function UsersScreen() {
         </Button>
       </View>
 
+      {/* US-07: búsqueda */}
+      {!loading && !usersError && users.length > 0 && (
+        <View style={styles.searchWrap}>
+          <TextInput
+            mode="outlined"
+            dense
+            placeholder="Buscar por nombre, usuario o local"
+            value={query}
+            onChangeText={setQuery}
+            left={<TextInput.Icon icon="magnify" />}
+            right={query ? <TextInput.Icon icon="close" onPress={() => setQuery('')} accessibilityLabel="Borrar búsqueda" /> : undefined}
+            style={styles.searchInput}
+            autoCapitalize="none"
+          />
+        </View>
+      )}
+      {!isRoot && rolesError && !usersError && (
+        <AppText variant="caption" style={styles.rolesWarn}>
+          No se pudieron cargar los Roles: las acciones sobre los usuarios quedan ocultas hasta que se recargue.
+        </AppText>
+      )}
+
       {/* Tabla */}
       {loading ? (
         <ActivityIndicator size="large" color={COLOR.brand} style={{ marginTop: 40 }} />
+      ) : usersError ? (
+        // US-13: error de carga con reintento, no el estado vacío.
+        <View style={styles.empty}>
+          <MaterialCommunityIcons name="cloud-off-outline" size={48} color={COLOR.inkDisabled} />
+          <AppText variant="title">No se pudieron cargar los usuarios</AppText>
+          <AppText variant="description">{usersError}</AppText>
+          <Button mode="contained" onPress={loadAll} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand}>Reintentar</Button>
+        </View>
       ) : users.length === 0 ? (
         <View style={styles.empty}>
           <MaterialCommunityIcons name="account-outline" size={48} color={COLOR.inkDisabled} />
@@ -285,12 +384,27 @@ export default function UsersScreen() {
             </View>
           )}
 
-          {users.map(user => (
-            <View key={user.id} style={[styles.row, user.status !== 'ACTIVE' && styles.rowSuspended]}>
+          {visibleUsers.length === 0 && (
+            <Text style={styles.noResults}>Ningún usuario coincide con "{query.trim()}".</Text>
+          )}
+
+          {visibleUsers.map(user => {
+            const self = isSelf(user);
+            const manageable = canManage(user);
+            return (
+            <View key={user.id} style={[styles.row, !isDesktop && styles.rowMobile, user.status !== 'ACTIVE' && styles.rowSuspended]}>
               {/* Nombre */}
               <View style={[styles.cell, styles.cellName]}>
-                <Text style={styles.userName}>{user.fullName}</Text>
-                {!isDesktop && <Text style={styles.userMeta}>@{user.username} · {user.storeName || user.roleName || 'Sin local principal'}</Text>}
+                <Text style={styles.userName}>
+                  {user.fullName}
+                  {self && <Text style={styles.selfTag}> (vos)</Text>}
+                </Text>
+                {/* US-01: en celular también se ve el Role (antes solo si no tenía local). */}
+                {!isDesktop && (
+                  <Text style={styles.userMeta}>
+                    @{user.username} · {user.storeName || 'Sin local principal'} · {roleLabel(user)}
+                  </Text>
+                )}
               </View>
 
               {/* Usuario (solo desktop) */}
@@ -300,7 +414,7 @@ export default function UsersScreen() {
               {isDesktop && <Text style={[styles.cell, styles.cellStore, styles.metaText]}>{user.storeName || '—'}</Text>}
 
               {/* Role (solo desktop) */}
-              {isDesktop && <Text style={[styles.cell, styles.cellRole, styles.metaText]}>{user.roleName || '—'}</Text>}
+              {isDesktop && <Text style={[styles.cell, styles.cellRole, styles.metaText]}>{roleLabel(user)}</Text>}
 
               {/* Estado */}
               <View style={[styles.cell, styles.cellStatus]}>
@@ -311,45 +425,68 @@ export default function UsersScreen() {
                 </View>
               </View>
 
-              {/* Acciones */}
-              <View style={[styles.cell, styles.cellActions]}>
-                {user.status === 'ACTIVE'
-                  ? <IconButton icon="pause-circle" size={20} iconColor={COLOR.warn} onPress={() => handleSuspend(user)} style={{ margin: 0 }} />
-                  : user.status === 'SUSPENDED'
-                  ? <IconButton icon="play-circle" size={20} iconColor={COLOR.income} onPress={() => handleActivate(user)} style={{ margin: 0 }} />
-                  : null}
-                <IconButton icon="store-edit" size={20} iconColor={COLOR.info} onPress={() => { setReassignModal(user); setReassignStoreId(user.storeId ? String(user.storeId) : ''); }} style={{ margin: 0 }} />
-                <IconButton icon="shield-account" size={20} iconColor={COLOR.brand} onPress={() => openAccess(user)} style={{ margin: 0 }} />
-                <IconButton icon="lock-reset" size={20} iconColor={COLOR.ink2} onPress={() => { setResetModal(user); setNewPassword(''); }} style={{ margin: 0 }} />
-                {user.status !== 'DELETED' && (
-                  <IconButton icon="delete" size={20} iconColor={COLOR.expense} onPress={() => handleDelete(user)} style={{ margin: 0 }} />
-                )}
-              </View>
+              {/* Acciones — US-01: solo sobre usuarios que el logueado puede gestionar.
+                  US-08: en celular van en una segunda línea para no apretar el nombre. */}
+              {manageable ? (
+                <View style={[styles.cell, isDesktop ? styles.cellActions : styles.cellActionsMobile]}>
+                  {user.status === 'ACTIVE'
+                    ? <IconButton icon="pause-circle" size={20} iconColor={COLOR.warn} onPress={() => handleSuspend(user)} style={{ margin: 0 }} accessibilityLabel={`Suspender a ${user.fullName}`} />
+                    : user.status === 'SUSPENDED'
+                    ? <IconButton icon="play-circle" size={20} iconColor={COLOR.income} onPress={() => handleActivate(user)} style={{ margin: 0 }} accessibilityLabel={`Activar a ${user.fullName}`} />
+                    : null}
+                  <IconButton icon="store-edit" size={20} iconColor={COLOR.info} onPress={() => { setReassignModal(user); setReassignStoreId(user.storeId ? String(user.storeId) : ''); }} style={{ margin: 0 }} accessibilityLabel={`Cambiar local de ${user.fullName}`} />
+                  <IconButton icon="shield-account" size={20} iconColor={COLOR.brand} onPress={() => openAccess(user)} style={{ margin: 0 }} accessibilityLabel={`Permisos de ${user.fullName}`} />
+                  <IconButton icon="lock-reset" size={20} iconColor={COLOR.ink2} onPress={() => { setResetModal(user); setNewPassword(''); setNewPassword2(''); }} style={{ margin: 0 }} accessibilityLabel={`Cambiar contraseña de ${user.fullName}`} />
+                  {user.status !== 'DELETED' && (
+                    <IconButton icon="delete" size={20} iconColor={COLOR.expense} onPress={() => handleDelete(user)} style={{ margin: 0 }} accessibilityLabel={`Eliminar a ${user.fullName}`} />
+                  )}
+                </View>
+              ) : isDesktop ? (
+                <Text style={[styles.cell, styles.cellActions, styles.metaText]}>—</Text>
+              ) : null}
             </View>
-          ))}
+            );
+          })}
         </ScrollView>
       )}
 
       {/* ── Modal crear usuario ── */}
-      <Modal visible={createModal} transparent animationType="fade" onRequestClose={() => setCreateModal(false)}>
-        <View style={styles.overlay}>
-          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+      <Modal visible={createModal} transparent animationType="fade" onRequestClose={() => { if (!saving) closeCreate(); }}>
+        {/* G-04: el teclado no tapa la contraseña en el celular. */}
+        <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 16 }} keyboardShouldPersistTaps="handled">
             <View style={[styles.modal, { width: '100%', maxWidth: 440 }]}>
               <AppText style={styles.modalTitle} variant="title">Nuevo usuario</AppText>
 
               <TextInput label="Nombre completo *" value={form.fullName} onChangeText={v => setForm({ ...form, fullName: v })} mode="outlined" style={styles.input} />
-              <TextInput label="Username *" value={form.username} onChangeText={v => setForm({ ...form, username: v.toLowerCase().replace(/\s+/g, '.') })} mode="outlined" style={styles.input} autoCapitalize="none" />
+              {/* US-09: etiqueta en castellano. */}
+              <TextInput label="Usuario (para iniciar sesión) *" value={form.username} onChangeText={v => setForm({ ...form, username: v.toLowerCase().replace(/\s+/g, '.') })} mode="outlined" style={styles.input} autoCapitalize="none" />
               <TextInput
                 label="Contraseña *" value={form.password}
                 onChangeText={v => setForm({ ...form, password: v })}
                 mode="outlined" style={styles.input}
                 secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoComplete="new-password"
                 right={<TextInput.Icon icon={showPassword ? 'eye-off' : 'eye'} onPress={() => setShowPassword(v => !v)} />}
               />
+              <TextInput
+                label="Repetir contraseña *" value={form.password2}
+                onChangeText={v => setForm({ ...form, password2: v })}
+                mode="outlined" style={styles.input}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoComplete="new-password"
+              />
+              <AppText variant="caption" style={styles.pwdHint}>Mínimo {MIN_PASSWORD} caracteres.</AppText>
 
               {/* Selector de local principal — opcional desde SPRINT-09 (un perfil
                   de solo lectura como contador/socio puede no tener uno fijo) */}
               <AppText style={styles.fieldLabel} variant="label">Local principal</AppText>
+              {stores.length === 0 && (
+                // US-12: explicar por qué el selector está vacío.
+                <AppText variant="caption" style={styles.roleNote}>No hay locales activos cargados. Podés crearlos desde Locales.</AppText>
+              )}
               <View style={styles.storeSelector}>
                 {stores.map(s => (
                   <TouchableOpacity
@@ -416,21 +553,29 @@ export default function UsersScreen() {
               )}
 
               <View style={styles.modalActions}>
-                <Button mode="outlined" onPress={() => { setCreateModal(false); setForm(EMPTY_FORM); }} style={{ flex: 1 }}>Cancelar</Button>
-                <Button mode="contained" onPress={handleCreate} loading={saving} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Crear usuario</Button>
+                <Button mode="outlined" onPress={closeCreate} disabled={saving} style={{ flex: 1 }}>Cancelar</Button>
+                {/* G-01 / US-03: loading no deshabilita en Paper; va junto a disabled. */}
+                <Button mode="contained" onPress={handleCreate} loading={saving} disabled={saving} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Crear usuario</Button>
               </View>
             </View>
           </ScrollView>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ── Modal reasignar local ── */}
-      <Modal visible={!!reassignModal} transparent animationType="fade" onRequestClose={() => setReassignModal(null)}>
+      <Modal visible={!!reassignModal} transparent animationType="fade" onRequestClose={() => { if (!reassigning) setReassignModal(null); }}>
         <View style={styles.overlay}>
           <View style={styles.modal}>
             <AppText style={styles.modalTitle} variant="title">Reasignar local</AppText>
             <AppText style={styles.modalSub} variant="subtitle">{reassignModal?.fullName}</AppText>
+            {/* US-05: el backend hoy no lo impide (ver reporte); avisar antes de mover. */}
+            <AppText variant="caption" style={styles.roleNote}>
+              Si tiene un turno abierto, primero debe cerrarlo: el punto de venta cambia de local al reasignarlo.
+            </AppText>
             <AppText style={styles.fieldLabel} variant="label">Seleccioná el nuevo local:</AppText>
+            {stores.length === 0 && (
+              <AppText variant="caption" style={styles.roleNote}>No hay locales activos cargados. Podés crearlos desde Locales.</AppText>
+            )}
             <View style={styles.storeSelector}>
               {stores.map(s => (
                 <TouchableOpacity
@@ -445,32 +590,47 @@ export default function UsersScreen() {
               ))}
             </View>
             <View style={styles.modalActions}>
-              <Button mode="outlined" onPress={() => setReassignModal(null)} style={{ flex: 1 }}>Cancelar</Button>
-              <Button mode="contained" onPress={handleReassign} loading={reassigning} buttonColor={COLOR.info} textColor={COLOR.white} style={{ flex: 1 }}>Reasignar</Button>
+              <Button mode="outlined" onPress={() => setReassignModal(null)} disabled={reassigning} style={{ flex: 1 }}>Cancelar</Button>
+              <Button mode="contained" onPress={handleReassign} loading={reassigning} disabled={reassigning || !reassignStoreId} buttonColor={COLOR.info} textColor={COLOR.white} style={{ flex: 1 }}>Reasignar</Button>
             </View>
           </View>
         </View>
       </Modal>
 
       {/* ── Modal reset password ── */}
-      <Modal visible={!!resetModal} transparent animationType="fade" onRequestClose={() => setResetModal(null)}>
-        <View style={styles.overlay}>
+      <Modal visible={!!resetModal} transparent animationType="fade" onRequestClose={() => { if (!resetting) closeReset(); }}>
+        {/* G-04: el teclado no tapa los campos de contraseña. */}
+        <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modal}>
-            <AppText style={styles.modalTitle} variant="title">Cambiar contraseña</AppText>
-            <AppText style={styles.modalSub} variant="subtitle">{resetModal?.fullName} (@{resetModal?.username})</AppText>
-            <TextInput
-              label="Nueva contraseña *" value={newPassword}
-              onChangeText={setNewPassword}
-              mode="outlined" style={[styles.input, { marginTop: 12 }]}
-              secureTextEntry={!showNewPwd}
-              right={<TextInput.Icon icon={showNewPwd ? 'eye-off' : 'eye'} onPress={() => setShowNewPwd(v => !v)} />}
-            />
-            <View style={styles.modalActions}>
-              <Button mode="outlined" onPress={() => setResetModal(null)} style={{ flex: 1 }}>Cancelar</Button>
-              <Button mode="contained" onPress={handleResetPassword} loading={resetting} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Guardar</Button>
-            </View>
+            <ScrollView keyboardShouldPersistTaps="handled">
+              <AppText style={styles.modalTitle} variant="title">Cambiar contraseña</AppText>
+              <AppText style={styles.modalSub} variant="subtitle">{resetModal?.fullName} (@{resetModal?.username})</AppText>
+              <TextInput
+                label="Nueva contraseña *" value={newPassword}
+                onChangeText={setNewPassword}
+                mode="outlined" style={[styles.input, { marginTop: 12 }]}
+                secureTextEntry={!showNewPwd}
+                autoCapitalize="none"
+                autoComplete="new-password"
+                right={<TextInput.Icon icon={showNewPwd ? 'eye-off' : 'eye'} onPress={() => setShowNewPwd(v => !v)} />}
+              />
+              {/* US-04: confirmación obligatoria. */}
+              <TextInput
+                label="Repetir contraseña *" value={newPassword2}
+                onChangeText={setNewPassword2}
+                mode="outlined" style={styles.input}
+                secureTextEntry={!showNewPwd}
+                autoCapitalize="none"
+                autoComplete="new-password"
+              />
+              <AppText variant="caption" style={styles.pwdHint}>Mínimo {MIN_PASSWORD} caracteres.</AppText>
+              <View style={styles.modalActions}>
+                <Button mode="outlined" onPress={closeReset} disabled={resetting} style={{ flex: 1 }}>Cancelar</Button>
+                <Button mode="contained" onPress={handleResetPassword} loading={resetting} disabled={resetting} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Guardar</Button>
+              </View>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ── Modal cambiar Role + locales accesibles (SPRINT-14) ── */}
@@ -519,8 +679,8 @@ export default function UsersScreen() {
               )}
 
               <View style={styles.modalActions}>
-                <Button mode="outlined" onPress={() => setAccessModal(null)} style={{ flex: 1 }}>Cancelar</Button>
-                <Button mode="contained" onPress={handleSaveAccess} loading={savingAccess} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Guardar</Button>
+                <Button mode="outlined" onPress={() => setAccessModal(null)} disabled={savingAccess} style={{ flex: 1 }}>Cancelar</Button>
+                <Button mode="contained" onPress={handleSaveAccess} loading={savingAccess} disabled={savingAccess} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Guardar</Button>
               </View>
             </View>
           </ScrollView>
@@ -532,7 +692,8 @@ export default function UsersScreen() {
         title={confirmDlg?.title ?? ''}
         message={confirmDlg?.message ?? ''}
         confirmLabel="Sí, confirmar"
-        onConfirm={() => confirmDlg?.onConfirm()}
+        // G-02 / US-02: cerrar el diálogo antes de ejecutar; un doble toque no repite la acción.
+        onConfirm={() => { const fn = confirmDlg?.onConfirm; setConfirmDlg(null); fn?.(); }}
         onCancel={() => setConfirmDlg(null)}
       />
       <Snackbar visible={!!snackbar} onDismiss={() => setSnackbar('')} duration={3000}>{snackbar}</Snackbar>
@@ -560,6 +721,15 @@ const styles = StyleSheet.create({
   cellRole:       { width: 110 },
   cellStatus:     { width: 110 },
   cellActions:    { flexDirection: 'row', alignItems: 'center', width: 160 },
+  // US-08: en celular la fila hace wrap y las acciones bajan a una segunda línea a ancho completo.
+  rowMobile:      { flexWrap: 'wrap', paddingVertical: SPACE.s1 },
+  cellActionsMobile: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', width: '100%', paddingTop: 0 },
+  selfTag:        { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.medium as any, color: COLOR.inkMute },
+  noResults:      { textAlign: 'center', padding: SPACE.s5, color: COLOR.inkMute, fontSize: FONT_SIZE.label },
+  searchWrap:     { paddingHorizontal: SPACE.s4, paddingTop: SPACE.s3, paddingBottom: SPACE.s2 },
+  searchInput:    { backgroundColor: COLOR.surface },
+  rolesWarn:      { marginHorizontal: SPACE.s4, marginBottom: SPACE.s2, color: COLOR.warn },
+  pwdHint:        { marginTop: -SPACE.s1, marginBottom: SPACE.s2, color: COLOR.inkMute },
   colHeader:      { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.inkMute } as any,
 
   userName:       { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },

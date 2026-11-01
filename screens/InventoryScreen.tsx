@@ -1034,7 +1034,7 @@ const InventoryScreen = () => {
             <TextInput label="Descripción" value={catDesc} onChangeText={setCatDesc} mode="outlined" style={styles.input} />
             <View style={styles.modalActions}>
               <Button mode="outlined" onPress={() => setCatModal(false)} style={{ flex: 1 }}>Cancelar</Button>
-              <Button mode="contained" onPress={handleSaveCat} loading={catSaving} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Guardar</Button>
+              <Button mode="contained" onPress={handleSaveCat} loading={catSaving} disabled={catSaving} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Guardar</Button>
             </View>
           </View>
         </View>
