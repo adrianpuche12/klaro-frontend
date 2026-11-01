@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
 import { useAuth } from './AuthContext';
-import { formatMoney } from '../utils/format';
+import { formatMoney, setAppTimeZone } from '../utils/format';
 
 /**
  * Configuración de la empresa logueada (GET /api/v3/tenant/config).
@@ -32,20 +32,24 @@ export const TenantConfigProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const refreshTenantConfig = useCallback(async () => {
     try {
       const r = await axios.get(`${REACT_APP_API_URL}/api/v3/tenant/config`);
+      // Las horas de toda la app se muestran en la zona de la empresa (utils/format.ts).
+      setAppTimeZone(r.data?.timezone ?? null);
       setConfig({
         companyName: r.data?.companyName ?? null,
         currency:    r.data?.currency ?? null,
         timezone:    r.data?.timezone ?? null,
       });
     } catch {
-      // Sin config (ej. administrador de plataforma, tenant 0): los montos se muestran sin símbolo.
+      // Sin config (ej. administrador de plataforma, tenant 0): los montos se muestran sin símbolo
+      // y las horas en la zona del dispositivo.
+      setAppTimeZone(null);
       setConfig(EMPTY);
     }
   }, []);
 
   useEffect(() => {
     if (isAuthenticated) refreshTenantConfig();
-    else setConfig(EMPTY);
+    else { setAppTimeZone(null); setConfig(EMPTY); }
   }, [isAuthenticated, refreshTenantConfig]);
 
   return (

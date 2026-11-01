@@ -9,6 +9,7 @@ import AppText from '../components/ui/AppText';
 import { TIMEZONES } from '../constants/timezones';
 import { useAuth } from '../context/AuthContext';
 import { COLOR, SPACE, RADIUS } from '../theme';
+import { formatDate } from '../utils/format';
 
 /**
  * Empresas — pantalla del administrador de plataforma (SPRINT-16).
@@ -200,7 +201,7 @@ export default function PlatformCompaniesScreen() {
                 </View>
                 <AppText variant="caption" color={COLOR.inkMute}>
                   {c.slug} · plan {c.plan} · id {c.id}
-                  {c.createdAt ? ` · alta ${new Date(c.createdAt).toLocaleDateString()}` : ''}
+                  {c.createdAt ? ` · alta ${formatDate(c.createdAt)}` : ''}
                 </AppText>
               </View>
               <Button
