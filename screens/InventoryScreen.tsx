@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput as RNTextInput, ActivityIndicator, Modal,
   useWindowDimensions, Pressable,
 } from 'react-native';
-import { Button, TextInput, Snackbar, IconButton } from 'react-native-paper';
+import { Button, TextInput, Snackbar, IconButton, HelperText } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
@@ -15,13 +15,15 @@ import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, CONTROL } from '.
 import { stockColor } from '../utils/stockStatus';
 import { useMoney } from '../context/TenantConfigContext';
 import { APP_LOCALE } from '../utils/format';
+import { parseQty, parseCount, parseMoney } from '../utils/parseInput';
+import { descendantIds, findCat, countProductsDeep } from '../utils/categories';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 interface Store       { id: number; name: string; active: boolean }
-interface Category    { id: number; name: string; active: boolean; parentId: number | null; children: Category[]; productCount: number }
+interface Category    { id: number; name: string; description?: string | null; active: boolean; parentId: number | null; children: Category[]; productCount: number }
 interface StockItem   { stockId: number; productId: number; productName: string; productSku: string; productType: string; productActive: boolean; price: number; quantity: number; minStock: number; lowStock: boolean; categoryName: string; categoryPath: string; categoryId: number | null; storeId: number; updatedAt: string }
-interface Movement    { id: number; type: string; quantity: number; reason: string | null; notes: string | null; username: string | null; productId: number; productName: string; storeId: number; createdAt: string }
+interface Movement    { id: number; type: string; quantity: number; reason: string | null; notes: string | null; username: string | null; performedBy?: string | null; source?: string | null; productId: number; productName: string; storeId: number; createdAt: string }
 interface Summary     { totalProducts: number; activeProducts: number; lowStockCount: number; categoryCount: number; estimatedValue: number }
 interface ProductForm { name: string; sku: string; type: string; price: string; minStock: string; description: string; categoryId: string }
 
@@ -39,10 +41,6 @@ const flattenCategories = (cats: Category[], prefix = ''): { id: number; label: 
 };
 
 // ─── Árbol de categorías — rediseñado ────────────────────────────────────────
-
-// Cuenta productos de forma recursiva
-const countProducts = (cat: Category): number =>
-  cat.productCount + cat.children.reduce((s, c) => s + countProducts(c), 0);
 
 // Filtra el árbol preservando estructura
 const filterTree = (cats: Category[], q: string): Category[] => {
@@ -97,7 +95,7 @@ const CategoryTree = ({ categories, selected, onSelect, onNew, onEdit, onDelete,
     setOpen(prev => new Set([...prev, ...matchedAncestors]));
   }, [catFilter, categories]);
 
-  const totalCount = categories.reduce((s, c) => s + countProducts(c), 0);
+  const totalCount = categories.reduce((s, c) => s + countProductsDeep(c), 0);
   const visibleCats = filterTree(categories, catFilter);
 
   const renderNode = (cat: Category, depth = 0): React.ReactElement => {
@@ -148,7 +146,8 @@ const CategoryTree = ({ categories, selected, onSelect, onNew, onEdit, onDelete,
           {/* Contador */}
           <View style={[styles.catCount, isSelected && styles.catCountSelected]}>
             <Text style={[styles.catCountText, isSelected && styles.catCountTextSelected]}>
-              {cat.productCount}
+              {/* I-13: suma las subcategorías (antes una categoría padre con productos solo en sus hijas mostraba 0) */}
+              {countProductsDeep(cat)}
             </Text>
           </View>
 
@@ -156,17 +155,18 @@ const CategoryTree = ({ categories, selected, onSelect, onNew, onEdit, onDelete,
           {showActions && (
             <View style={styles.catActions}>
               {cat.children.length === 0 && (
-                <IconButton icon="plus" size={14} iconColor={COLOR.income} onPress={() => onNewChild(cat.id)} style={{ margin: 0 }} />
+                <IconButton icon="plus" size={18} iconColor={COLOR.income} onPress={() => onNewChild(cat.id)} style={{ margin: 0 }} accessibilityLabel="Nueva subcategoría" />
               )}
-              <IconButton icon="pencil" size={14} iconColor={COLOR.ink2} onPress={() => onEdit(cat)} style={{ margin: 0 }} />
+              <IconButton icon="pencil" size={18} iconColor={COLOR.ink2} onPress={() => onEdit(cat)} style={{ margin: 0 }} accessibilityLabel="Editar" />
               <IconButton
                 icon={cat.active ? 'toggle-switch' : 'toggle-switch-off'}
-                size={14}
+                size={18}
                 iconColor={cat.active ? COLOR.income : COLOR.inkDisabled}
                 onPress={() => onToggle(cat)}
                 style={{ margin: 0 }}
+                accessibilityLabel={cat.active ? 'Desactivar' : 'Activar'}
               />
-              <IconButton icon="trash-can" size={14} iconColor={COLOR.expense} onPress={() => onDelete(cat)} style={{ margin: 0 }} />
+              <IconButton icon="trash-can" size={18} iconColor={COLOR.expense} onPress={() => onDelete(cat)} style={{ margin: 0 }} accessibilityLabel="Eliminar" />
             </View>
           )}
         </Pressable>
@@ -193,8 +193,8 @@ const CategoryTree = ({ categories, selected, onSelect, onNew, onEdit, onDelete,
           </View>
         </View>
         <View style={{ flexDirection: 'row', gap: 0 }}>
-          <IconButton icon="chevron-up"   size={14} iconColor={COLOR.inkMute} onPress={collapseAll} style={{ margin: 0 }} />
-          <IconButton icon="chevron-down" size={14} iconColor={COLOR.inkMute} onPress={expandAll}   style={{ margin: 0 }} />
+          <IconButton icon="chevron-up"   size={18} iconColor={COLOR.inkMute} onPress={collapseAll} style={{ margin: 0 }} accessibilityLabel="Contraer todas" />
+          <IconButton icon="chevron-down" size={18} iconColor={COLOR.inkMute} onPress={expandAll}   style={{ margin: 0 }} accessibilityLabel="Expandir todas" />
         </View>
       </View>
 
@@ -257,12 +257,21 @@ const InventoryScreen = () => {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
 
-  const { canManageUsers } = useAuth();
-  // SPRINT-14: preserva el comportamiento exacto de antes (roles.includes('admin'),
-  // sin OR con root -- así era el chequeo original). Si en el futuro esto debería
-  // ser una capacidad propia (ej. INVENTORY_ADJUST) en vez de calcado de "admin",
-  // es una decisión de negocio a confirmar con Jorge, no asumida acá.
-  const isAdmin = canManageUsers;
+  const { roles, canManageUsers, permissions, userName } = useAuth();
+  // I-01 (Revisión 04), adaptado al modelo SPRINT-14 (root / staff + canManageUsers +
+  // permissions, ver config/navConfig.ts):
+  //  - root puede todo, siempre (no depende de que AuthContext le haya puesto canManageUsers).
+  //  - staff con canManageUsers: gestiona según los módulos de su Role. CATALOG habilita
+  //    crear/editar/activar/borrar productos y categorías; INVENTORY habilita las salidas
+  //    de stock. permissions === null es el caso legacy (acceso total), igual que navConfig.
+  //  - staff sin canManageUsers (cajero): solo ve el stock y registra entradas ("Agregar").
+  // Si las entradas del cajero deberían requerir un permiso propio es una decisión de
+  // producto pendiente (ver BUGS.md "Para decidir"); no se cambia acá.
+  const isRoot = roles.includes('root');
+  const hasModule = (m: string) => permissions === null || permissions.includes(m);
+  const isManager      = isRoot || canManageUsers;                       // selector de local, vista de gestión
+  const canEditCatalog = isRoot || (canManageUsers && hasModule('CATALOG'));
+  const canAdjustOut   = isRoot || (canManageUsers && hasModule('INVENTORY'));
 
   const { stores, selectedStore, setSelectedStore } = useStore();
   const storeId = selectedStore?.id ?? null;
@@ -272,7 +281,8 @@ const InventoryScreen = () => {
   const [loading, setLoading]             = useState(false);
   const [search, setSearch]               = useState('');
   const [selectedCat, setSelectedCat]     = useState<number | null>(null);
-  const [showCatPanel, setShowCatPanel]   = useState(true);
+  // I-11: en celular el panel de categorías arranca cerrado (tapaba la lista).
+  const [showCatPanel, setShowCatPanel]   = useState(width >= 900);
   const [topExpanded, setTopExpanded]     = useState(true);
   const [snackbar, setSnackbar]           = useState('');
   const [activeView, setActiveView]       = useState<'stock' | 'movements'>('stock');
@@ -297,6 +307,14 @@ const InventoryScreen = () => {
   const [productSaving, setProductSaving]   = useState(false);
   const [catPickerOpen, setCatPickerOpen]   = useState(false);
   const [catPickerLabel, setCatPickerLabel] = useState('');
+  // I-18: el listado de stock no trae la descripción y el PUT del backend la reemplaza
+  // siempre (ausente o '' → la pisa). Al editar se trae el producto completo; mientras no
+  // se haya podido leer y el usuario no la haya escrito, no se deja guardar.
+  const [descStatus, setDescStatus]         = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
+  const [descTouched, setDescTouched]       = useState(false);
+  const descTouchedRef                      = useRef(false);
+  const editingProductId                    = useRef<number | null>(null);
+  const markDescTouched = (v: boolean) => { descTouchedRef.current = v; setDescTouched(v); };
 
   // Categorías modal
   const [catModal, setCatModal]           = useState(false);
@@ -330,14 +348,22 @@ const InventoryScreen = () => {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  // I-09: el local de la última consulta de movimientos; una respuesta tardía de otro
+  // local se descarta (si no, se veían los movimientos del local anterior con el nombre del nuevo).
+  const movStoreRef = useRef<number | null>(null);
   const loadMovements = useCallback(async () => {
-    if (!storeId) return;
+    movStoreRef.current = storeId;
+    if (!storeId) { setMovements([]); return; }
     setLoadingMov(true);
     try {
       const res = await axios.get<Movement[]>(`${API}/api/v2/stores/${storeId}/stock/movements`);
+      if (movStoreRef.current !== storeId) return;
       setMovements(res.data);
-    } catch { setSnackbar('Error al cargar movimientos'); }
-    finally { setLoadingMov(false); }
+    } catch {
+      if (movStoreRef.current !== storeId) return;
+      setSnackbar('Error al cargar movimientos');
+    }
+    finally { if (movStoreRef.current === storeId) setLoadingMov(false); }
   }, [storeId]);
 
   const handleViewChange = (view: 'stock' | 'movements') => {
@@ -345,11 +371,21 @@ const InventoryScreen = () => {
     if (view === 'movements') loadMovements();
   };
 
+  // I-09: si se está en Historial y se cambia de local, recargar los movimientos.
+  useEffect(() => {
+    if (activeView === 'movements') loadMovements();
+    else setMovements([]);
+  }, [storeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // I-10: las categorías son por local; al cambiar de local se limpia el filtro y la búsqueda.
+  useEffect(() => { setSelectedCat(null); setSearch(''); }, [storeId]);
+
   // ── Filtrado ─────────────────────────────────────────────────────────────────
 
-  // Recoge todos los nombres de una categoría y sus descendientes
-  const allCatNames = (cat: Category): string[] =>
-    [cat.name, ...cat.children.flatMap(allCatNames)];
+  // I-06: el filtro por categoría compara ids (antes nombres del categoryPath, y dos
+  // categorías "Frías" en padres distintos se mezclaban). Se calcula una vez por render.
+  const selectedCatNode = selectedCat !== null ? findCat(categories, selectedCat) : null;
+  const selectedCatIds  = selectedCatNode ? new Set(descendantIds(selectedCatNode)) : null;
 
   const filtered = stock.filter(item => {
     // Filtro por búsqueda
@@ -361,66 +397,117 @@ const InventoryScreen = () => {
 
     // Filtro por categoría seleccionada
     if (selectedCat !== null) {
-      const cat = findCat(categories, selectedCat);
-      if (!cat) return false;
-
-      // Si el producto no tiene categoría → no mostrar cuando hay filtro activo
-      if (!item.categoryPath) return false;
-
-      // El path del producto debe contener la categoría seleccionada o alguna de sus hijas
-      const validNames = allCatNames(cat);
-      const pathParts  = item.categoryPath.split(' > ');
-      const matches    = pathParts.some(part => validNames.includes(part));
-      if (!matches) return false;
+      // Sin categoría, o una categoría que ya no existe en este local → no se muestra.
+      if (!selectedCatIds || item.categoryId == null) return false;
+      if (!selectedCatIds.has(item.categoryId)) return false;
     }
 
     return true;
   });
 
-  function findCat(cats: Category[], id: number): Category | null {
-    for (const c of cats) { if (c.id === id) return c; const f = findCat(c.children, id); if (f) return f; }
-    return null;
-  }
+  // Mensaje de error: el del backend si viene; si no, distinguir corte de red de error del servidor (I-15).
+  const errorMsg = (e: any, fallback: string) =>
+    e?.response?.data?.error ?? e?.response?.data?.message ?? (e?.response ? fallback : 'Sin conexión con el servidor');
 
   // ── Ajuste de stock ──────────────────────────────────────────────────────────
 
+  // I-07: abrir siempre con el modal limpio (antes quedaba la cantidad del producto anterior).
+  const openAdjust = (item: StockItem) => {
+    setAdjustType('ENTRADA'); setAdjustQty(''); setAdjustReason(''); setAdjustItem(item);
+  };
+  const closeAdjust = () => { if (!adjustSaving) setAdjustItem(null); };
+
   const handleAdjust = async () => {
-    if (!adjustItem || !adjustQty || Number(adjustQty) <= 0) { setSnackbar('Ingresá una cantidad válida'); return; }
+    if (!adjustItem || !storeId || adjustSaving) return;
+    // I-04: entero > 0 ("1,5", "abc", "2.5" ya no pasan como NaN).
+    const qty = parseQty(adjustQty);
+    if (qty === null) { setSnackbar('Ingresá una cantidad entera mayor a 0'); return; }
+    // Defensa en profundidad: la UI solo ofrece Salida a quien puede, pero se revalida acá.
+    if (adjustType === 'SALIDA' && !canAdjustOut) { setSnackbar('No tenés permiso para descontar stock'); return; }
+    if (adjustType === 'SALIDA' && qty > adjustItem.quantity) {
+      setSnackbar(`No podés descontar más de ${adjustItem.quantity} (stock actual)`); return;
+    }
     setAdjustSaving(true);
     try {
       await axios.post(`${API}/api/v2/stores/${storeId}/stock/adjustment`, {
         productId: adjustItem.productId, type: adjustType,
-        quantity: Number(adjustQty), reason: adjustReason, username: 'admin',
+        // I-03: el usuario real de la sesión (antes 'admin' fijo). Si no hay userName se
+        // manda null y el backend usa el usuario del token.
+        quantity: qty, reason: adjustReason.trim() || null, username: userName ?? null,
       });
       setSnackbar(`Stock ${adjustType === 'ENTRADA' ? 'agregado' : 'descontado'} correctamente`);
       setAdjustItem(null); setAdjustQty(''); setAdjustReason('');
       loadAll();
     } catch (e: any) {
-      setSnackbar(e.response?.data?.error || 'Error al ajustar stock');
+      setSnackbar(errorMsg(e, 'Error al ajustar stock'));
     } finally { setAdjustSaving(false); }
   };
 
   // ── CRUD Producto ─────────────────────────────────────────────────────────────
 
   const openCreateProduct = () => {
+    editingProductId.current = null;
     setEditProduct(null);
     setProductForm(EMPTY_PRODUCT);
     setCatPickerLabel('');
+    setDescStatus('ok'); markDescTouched(false);
     setProductModal(true);
+  };
+
+  // I-18: GET /api/v2/products/{id} devuelve la descripción (ProductResponseDTO).
+  const loadProductDescription = async (productId: number) => {
+    setDescStatus('loading');
+    try {
+      const { data } = await axios.get(`${API}/api/v2/products/${productId}`);
+      if (editingProductId.current !== productId) return; // se cerró o se abrió otro producto
+      // Si el usuario ya escribió algo mientras cargaba, no se pisa lo que escribió.
+      if (!descTouchedRef.current) setProductForm(f => ({ ...f, description: data?.description ?? '' }));
+      setDescStatus('ok');
+    } catch {
+      if (editingProductId.current !== productId) return;
+      setDescStatus('error');
+    }
   };
 
   const openEditProduct = (item: StockItem) => {
+    editingProductId.current = item.productId;
     setEditProduct(item);
-    setProductForm({ name: item.productName, sku: item.productSku || '', type: item.productType, price: String(item.price), minStock: String(item.minStock), description: '', categoryId: item.categoryId ? String(item.categoryId) : '' });
+    setProductForm({ name: item.productName, sku: item.productSku || '', type: item.productType, price: String(item.price ?? ''), minStock: String(item.minStock ?? 0), description: '', categoryId: item.categoryId ? String(item.categoryId) : '' });
     setCatPickerLabel(item.categoryPath || '');
+    markDescTouched(false);
     setProductModal(true);
+    loadProductDescription(item.productId);
+  };
+
+  const closeProductModal = () => {
+    if (productSaving) return;
+    editingProductId.current = null;
+    setProductModal(false);
   };
 
   const handleSaveProduct = async () => {
-    if (!productForm.name || !productForm.price) { setSnackbar('Nombre y precio son obligatorios'); return; }
+    if (productSaving) return;
+    if (!canEditCatalog) { setSnackbar('No tenés permiso para modificar productos'); return; }
+    // I-20: sin local elegido se mandaba POST /stores/null/products.
+    if (!editProduct && !storeId) { setSnackbar('Seleccioná un local primero'); return; }
+    // I-05: precio con coma o con símbolo, negativo o "abc"; stock mínimo entero >= 0.
+    const name     = productForm.name.trim();
+    const price    = parseMoney(productForm.price);
+    const minStock = productForm.minStock.trim() === '' ? 0 : parseCount(productForm.minStock);
+    if (!name) { setSnackbar('El nombre es obligatorio'); return; }
+    if (price === null) { setSnackbar('Precio inválido. Ejemplo: 120.50'); return; }
+    if (minStock === null) { setSnackbar('El stock mínimo debe ser un número entero'); return; }
+    // I-18: el PUT reemplaza la descripción siempre; si no se pudo leer la actual y el
+    // usuario no la escribió, guardar la borraría.
+    if (editProduct && !descTouched && descStatus !== 'ok') {
+      setSnackbar(descStatus === 'loading'
+        ? 'Esperá a que termine de cargar el producto'
+        : 'No se pudo leer la descripción actual. Reintentá antes de guardar');
+      return;
+    }
     setProductSaving(true);
     try {
-      const body = { name: productForm.name, sku: productForm.sku, type: productForm.type, price: Number(productForm.price), minStock: Number(productForm.minStock), description: productForm.description, categoryId: productForm.categoryId ? Number(productForm.categoryId) : null };
+      const body = { name, sku: productForm.sku.trim(), type: productForm.type, price, minStock, description: productForm.description, categoryId: productForm.categoryId ? Number(productForm.categoryId) : null };
       if (editProduct) {
         await axios.put(`${API}/api/v2/products/${editProduct.productId}`, body);
         setSnackbar('Producto actualizado');
@@ -428,19 +515,21 @@ const InventoryScreen = () => {
         await axios.post(`${API}/api/v2/stores/${storeId}/products`, body);
         setSnackbar('Producto creado');
       }
+      editingProductId.current = null;
       setProductModal(false); loadAll();
-    } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error al guardar'); }
+    } catch (e: any) { setSnackbar(errorMsg(e, 'No se pudo guardar el producto')); }
     finally { setProductSaving(false); }
   };
 
+  // I-02: el diálogo se cierra antes de ejecutar (ver onConfirm del ConfirmDialog), así que
+  // los handlers ya no lo cierran en el finally.
   const handleToggleProduct = (item: StockItem) => {
     askConfirm(
       item.productActive ? 'Desactivar producto' : 'Activar producto',
       `¿${item.productActive ? 'Desactivar' : 'Activar'} "${item.productName}"?`,
       async () => {
         try { await axios.put(`${API}/api/v2/products/${item.productId}/toggle`); loadAll(); }
-        catch { setSnackbar('Error al cambiar estado'); }
-        finally { setConfirmDlg(null); }
+        catch (e: any) { setSnackbar(errorMsg(e, 'No se pudo cambiar el estado del producto')); }
       }
     );
   };
@@ -451,8 +540,7 @@ const InventoryScreen = () => {
       `¿Eliminar "${item.productName}"? Esta acción no se puede deshacer.`,
       async () => {
         try { await axios.delete(`${API}/api/v2/products/${item.productId}`); setSnackbar('Producto eliminado'); loadAll(); }
-        catch { setSnackbar('No se puede eliminar — el producto tiene historial'); }
-        finally { setConfirmDlg(null); }
+        catch (e: any) { setSnackbar(errorMsg(e, 'No se pudo eliminar el producto')); }
       }
     );
   };
@@ -463,26 +551,30 @@ const InventoryScreen = () => {
     setEditCat(null); setCatParentId(parentId); setCatName(''); setCatDesc(''); setCatModal(true);
   };
 
+  // I-19: el árbol de GET /stores/{id}/categories ya trae la descripción
+  // (CategoryResponseDTO); antes se abría con '' y el PUT la borraba.
   const openEditCat = (cat: Category) => {
-    setEditCat(cat); setCatParentId(cat.parentId); setCatName(cat.name); setCatDesc(''); setCatModal(true);
+    setEditCat(cat); setCatParentId(cat.parentId); setCatName(cat.name); setCatDesc(cat.description ?? ''); setCatModal(true);
   };
 
   const handleSaveCat = async () => {
+    if (catSaving) return;
+    if (!canEditCatalog) { setSnackbar('No tenés permiso para modificar categorías'); return; }
     if (!catName.trim()) { setSnackbar('El nombre es obligatorio'); return; }
     if (!storeId) { setSnackbar('Seleccioná un local primero'); return; }
     setCatSaving(true);
     try {
+      const body = { name: catName.trim(), description: catDesc };
       if (editCat) {
-        await axios.put(`${API}/api/v2/categories/${editCat.id}`, { name: catName, description: catDesc });
+        await axios.put(`${API}/api/v2/categories/${editCat.id}`, body);
       } else if (catParentId) {
-        await axios.post(`${API}/api/v2/stores/${storeId}/categories/${catParentId}/children`, { name: catName, description: catDesc });
+        await axios.post(`${API}/api/v2/stores/${storeId}/categories/${catParentId}/children`, body);
       } else {
-        await axios.post(`${API}/api/v2/stores/${storeId}/categories`, { name: catName, description: catDesc });
+        await axios.post(`${API}/api/v2/stores/${storeId}/categories`, body);
       }
       setCatModal(false); loadAll();
     } catch (err: any) {
-      const msg = err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Error al guardar categoría';
-      setSnackbar(msg);
+      setSnackbar(errorMsg(err, 'No se pudo guardar la categoría'));
     }
     finally { setCatSaving(false); }
   };
@@ -492,16 +584,19 @@ const InventoryScreen = () => {
       'Eliminar categoría',
       `¿Eliminar "${cat.name}"? Se eliminará junto con sus subcategorías.`,
       async () => {
-        try { await axios.delete(`${API}/api/v2/categories/${cat.id}`); setSnackbar('Categoría eliminada'); loadAll(); }
-        catch { setSnackbar('No se puede eliminar — tiene subcategorías o productos activos'); }
-        finally { setConfirmDlg(null); }
+        try {
+          await axios.delete(`${API}/api/v2/categories/${cat.id}`); setSnackbar('Categoría eliminada');
+          if (selectedCat !== null && descendantIds(cat).includes(selectedCat)) setSelectedCat(null);
+          loadAll();
+        }
+        catch (e: any) { setSnackbar(errorMsg(e, 'No se pudo eliminar la categoría')); }
       }
     );
   };
 
   const handleToggleCat = async (cat: Category) => {
     try { await axios.put(`${API}/api/v2/categories/${cat.id}/toggle`); loadAll(); }
-    catch { setSnackbar('Error al cambiar estado de categoría'); }
+    catch (e: any) { setSnackbar(errorMsg(e, 'No se pudo cambiar el estado de la categoría')); }
   };
 
   // ── Movimientos ──────────────────────────────────────────────────────────────
@@ -526,17 +621,31 @@ const InventoryScreen = () => {
     }
   };
 
+  // I-08: en el backend (InventoryService.adjust) solo SALIDA descuenta; ENTRADA y AJUSTE
+  // suman y `quantity` se guarda siempre positiva (@Min(1)). Se usa el signo de quantity
+  // si algún día viniera negativa, y si no, el del tipo.
+  const movSign = (m: Movement): 1 | -1 =>
+    m.quantity < 0 ? -1 : m.type === 'SALIDA' || m.type === 'VENTA' ? -1 : 1;
+  // Las ventas llegan como SALIDA con source = 'SALE' (SalesService.deductStock).
+  const movKind = (m: Movement) => (m.source === 'SALE' ? 'VENTA' : m.type);
+  const movWho  = (m: Movement) => m.username || m.performedBy || '';
+
   const renderMovementRow = (m: Movement) => (
     <View key={m.id} style={styles.movRow}>
-      <View style={[styles.movTypeBadge, { backgroundColor: movTypeColor(m.type) + '18' }]}>
-        <Text style={[styles.movTypeText, { color: movTypeColor(m.type) }]}>{movTypeLabel(m.type)}</Text>
+      <View style={[styles.movTypeBadge, { backgroundColor: movTypeColor(movKind(m)) + '18' }]}>
+        <Text style={[styles.movTypeText, { color: movTypeColor(movKind(m)) }]}>{movTypeLabel(movKind(m))}</Text>
       </View>
       <View style={styles.movInfo}>
         <Text style={styles.movProduct} numberOfLines={1}>{m.productName}</Text>
-        {m.reason ? <Text style={styles.movReason} numberOfLines={1}>{m.reason}</Text> : null}
+        {/* I-03: quién hizo el movimiento (username; performedBy como respaldo) + motivo */}
+        {movWho(m) || m.reason ? (
+          <Text style={styles.movReason} numberOfLines={1}>
+            {[movWho(m), m.reason].filter(Boolean).join(' · ')}
+          </Text>
+        ) : null}
       </View>
-      <Text style={[styles.movQty, { color: (m.type === 'ENTRADA' || m.type === 'AJUSTE') ? COLOR.income : COLOR.expense }]}>
-        {m.type === 'ENTRADA' ? '+' : '-'}{m.quantity}
+      <Text style={[styles.movQty, { color: movSign(m) > 0 ? COLOR.income : COLOR.expense }]}>
+        {movSign(m) > 0 ? '+' : '-'}{Math.abs(m.quantity)}
       </Text>
       <Text style={styles.movDate}>
         {new Date(m.createdAt).toLocaleDateString(APP_LOCALE, { day: '2-digit', month: '2-digit' })}{'\n'}
@@ -573,23 +682,25 @@ const InventoryScreen = () => {
         {/* Botón agregar/ajustar stock — siempre visible */}
         <TouchableOpacity
           style={styles.adjustBtn}
-          onPress={() => { setAdjustType('ENTRADA'); setAdjustItem(item); }}
+          onPress={() => openAdjust(item)}
+          accessibilityLabel={`${canAdjustOut ? 'Ajustar' : 'Agregar'} stock de ${item.productName}`}
         >
-          <Text style={styles.adjustBtnText}>{isAdmin ? 'Ajustar' : 'Agregar'}</Text>
+          <Text style={styles.adjustBtnText}>{canAdjustOut ? 'Ajustar' : 'Agregar'}</Text>
         </TouchableOpacity>
 
-        {/* Acciones de admin: editar, toggle, eliminar */}
-        {isAdmin && <IconButton icon="pencil" size={18} iconColor={COLOR.ink2} onPress={() => openEditProduct(item)} style={styles.actionIcon} />}
-        {isAdmin && (
+        {/* Acciones de catálogo (root, o staff con canManageUsers + CATALOG): editar, toggle, eliminar */}
+        {canEditCatalog && <IconButton icon="pencil" size={18} iconColor={COLOR.ink2} onPress={() => openEditProduct(item)} style={styles.actionIcon} accessibilityLabel="Editar producto" />}
+        {canEditCatalog && (
           <IconButton
             icon={item.productActive ? 'toggle-switch' : 'toggle-switch-off'}
             size={18}
             iconColor={item.productActive ? COLOR.income : COLOR.inkDisabled}
             onPress={() => handleToggleProduct(item)}
             style={styles.actionIcon}
+            accessibilityLabel={item.productActive ? 'Desactivar producto' : 'Activar producto'}
           />
         )}
-        {isAdmin && <IconButton icon="trash-can" size={18} iconColor={COLOR.expense} onPress={() => handleDeleteProduct(item)} style={styles.actionIcon} />}
+        {canEditCatalog && <IconButton icon="trash-can" size={18} iconColor={COLOR.expense} onPress={() => handleDeleteProduct(item)} style={styles.actionIcon} accessibilityLabel="Eliminar producto" />}
       </View>
     </View>
   );
@@ -603,8 +714,8 @@ const InventoryScreen = () => {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Text style={styles.headerTitle}>Inventario</Text>
-          {/* Selector de local — solo admin (usuario ya tiene su local asignado) */}
-          {isAdmin ? (
+          {/* Selector de local — root o staff con canManageUsers (el cajero ya tiene su local asignado) */}
+          {isManager ? (
             <View style={styles.storeSelector}>
               {stores.map(s => (
                 <TouchableOpacity
@@ -648,7 +759,7 @@ const InventoryScreen = () => {
                 labelStyle={{ fontSize: FONT_SIZE.caption }}>
                 {topExpanded ? 'Cerrar' : 'Resumen'}
               </Button>
-              {isAdmin && (
+              {canEditCatalog && (
                 <Button mode="contained" onPress={openCreateProduct} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ borderRadius: RADIUS.r2 }}>
                   + Nuevo producto
                 </Button>
@@ -691,8 +802,17 @@ const InventoryScreen = () => {
               style={styles.searchInput}
             />
           </View>
+          {/* I-11: categoría activa visible junto al buscador, con × para quitarla */}
+          {selectedCatNode && (
+            <View style={styles.catChip}>
+              <Text style={styles.catChipText} numberOfLines={1}>{selectedCatNode.name}</Text>
+              <TouchableOpacity onPress={() => setSelectedCat(null)} hitSlop={8} accessibilityLabel="Quitar filtro de categoría">
+                <MaterialCommunityIcons name="close" size={14} color={COLOR.brandDeep} />
+              </TouchableOpacity>
+            </View>
+          )}
           {!isDesktop && (
-            <IconButton icon="filter-variant" size={22} iconColor={COLOR.ink} onPress={() => setShowCatPanel(v => !v)} />
+            <IconButton icon="filter-variant" size={22} iconColor={COLOR.ink} onPress={() => setShowCatPanel(v => !v)} accessibilityLabel={showCatPanel ? 'Ocultar categorías' : 'Mostrar categorías'} />
           )}
         </View>
       )}
@@ -708,13 +828,13 @@ const InventoryScreen = () => {
                 <CategoryTree
                   categories={categories}
                   selected={selectedCat}
-                  onSelect={setSelectedCat}
+                  onSelect={(id) => { setSelectedCat(id); if (!isDesktop) setShowCatPanel(false); }}
                   onNew={() => openNewCat(null)}
                   onEdit={openEditCat}
                   onDelete={handleDeleteCat}
                   onNewChild={(parentId) => openNewCat(parentId)}
                   onToggle={handleToggleCat}
-                  isAdmin={isAdmin}
+                  isAdmin={canEditCatalog}
                 />
               )}
             </View>
@@ -775,7 +895,7 @@ const InventoryScreen = () => {
       )}
 
       {/* ── Modal ajuste de stock ── */}
-      <Modal visible={!!adjustItem} transparent animationType="fade" onRequestClose={() => setAdjustItem(null)}>
+      <Modal visible={!!adjustItem} transparent animationType="fade" onRequestClose={closeAdjust}>
         <View style={styles.overlay}>
           <View style={styles.modal}>
             <Text style={styles.modalTitle}>
@@ -784,9 +904,9 @@ const InventoryScreen = () => {
             <Text style={styles.modalSub}>{adjustItem?.productName}</Text>
             <Text style={styles.modalStock}>Stock actual: <Text style={{ fontWeight: '900' }}>{adjustItem?.quantity}</Text></Text>
 
-            {/* Selector de tipo — solo admin ve SALIDA */}
+            {/* Selector de tipo — SALIDA solo para root o staff con canManageUsers + INVENTORY */}
             <View style={styles.typeRow}>
-              {(isAdmin ? (['ENTRADA', 'SALIDA'] as const) : (['ENTRADA'] as const)).map(t => (
+              {(canAdjustOut ?(['ENTRADA', 'SALIDA'] as const) : (['ENTRADA'] as const)).map(t => (
                 <Button key={t} mode="contained" onPress={() => setAdjustType(t)}
                   buttonColor={adjustType === t ? (t === 'ENTRADA' ? COLOR.income : COLOR.expense) : COLOR.bg}
                   textColor={adjustType === t ? COLOR.white : COLOR.ink2} style={{ flex: 1, borderRadius: RADIUS.r2 }}>
@@ -795,12 +915,15 @@ const InventoryScreen = () => {
               ))}
             </View>
 
-            <TextInput label="Cantidad *" value={adjustQty} onChangeText={setAdjustQty} keyboardType="numeric" mode="outlined" style={styles.input} />
+            <TextInput label="Cantidad *" value={adjustQty} onChangeText={setAdjustQty} keyboardType="number-pad" mode="outlined" style={styles.input} />
+            {adjustType === 'SALIDA' && (
+              <HelperText type="info" visible style={styles.helperTight}>Máximo {adjustItem?.quantity ?? 0}</HelperText>
+            )}
             <TextInput label="Motivo" value={adjustReason} onChangeText={setAdjustReason} mode="outlined" style={styles.input} />
 
             <View style={styles.modalActions}>
-              <Button mode="outlined" onPress={() => setAdjustItem(null)} style={{ flex: 1 }}>Cancelar</Button>
-              <Button mode="contained" onPress={handleAdjust} loading={adjustSaving}
+              <Button mode="outlined" onPress={closeAdjust} disabled={adjustSaving} style={{ flex: 1 }}>Cancelar</Button>
+              <Button mode="contained" onPress={handleAdjust} loading={adjustSaving} disabled={adjustSaving}
                 buttonColor={adjustType === 'ENTRADA' ? COLOR.income : COLOR.expense} style={{ flex: 1 }}>
                 Confirmar
               </Button>
@@ -810,7 +933,7 @@ const InventoryScreen = () => {
       </Modal>
 
       {/* ── Modal producto ── */}
-      <Modal visible={productModal} transparent animationType="fade" onRequestClose={() => setProductModal(false)}>
+      <Modal visible={productModal} transparent animationType="fade" onRequestClose={closeProductModal}>
         <View style={styles.overlay}>
           <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 16 }}>
             <View style={[styles.modal, { width: '100%', maxWidth: 480 }]}>
@@ -818,8 +941,8 @@ const InventoryScreen = () => {
 
               <TextInput label="Nombre *" value={productForm.name} onChangeText={v => setProductForm({ ...productForm, name: v })} mode="outlined" style={styles.input} />
               <TextInput label="SKU (código)" value={productForm.sku} onChangeText={v => setProductForm({ ...productForm, sku: v })} mode="outlined" style={styles.input} />
-              <TextInput label="Precio *" value={productForm.price} onChangeText={v => setProductForm({ ...productForm, price: v })} keyboardType="numeric" mode="outlined" style={styles.input} />
-              <TextInput label="Stock mínimo (alerta)" value={productForm.minStock} onChangeText={v => setProductForm({ ...productForm, minStock: v })} keyboardType="numeric" mode="outlined" style={styles.input} />
+              <TextInput label="Precio *" value={productForm.price} onChangeText={v => setProductForm({ ...productForm, price: v })} keyboardType="decimal-pad" mode="outlined" style={styles.input} />
+              <TextInput label="Stock mínimo (alerta)" value={productForm.minStock} onChangeText={v => setProductForm({ ...productForm, minStock: v })} keyboardType="number-pad" mode="outlined" style={styles.input} />
 
               {/* Tipo */}
               <Text style={styles.fieldLabel}>Tipo</Text>
@@ -845,11 +968,22 @@ const InventoryScreen = () => {
                 <MaterialCommunityIcons name="chevron-down" size={18} color={COLOR.ink2} />
               </TouchableOpacity>
 
-              <TextInput label="Descripción" value={productForm.description} onChangeText={v => setProductForm({ ...productForm, description: v })} mode="outlined" style={styles.input} multiline numberOfLines={2} />
+              <TextInput
+                label={editProduct && descStatus === 'loading' && !descTouched ? 'Descripción (cargando…)' : 'Descripción'}
+                value={productForm.description}
+                onChangeText={v => { markDescTouched(true); setProductForm(f => ({ ...f, description: v })); }}
+                mode="outlined" style={styles.input} multiline numberOfLines={2}
+              />
+              {editProduct && descStatus === 'error' && !descTouched && (
+                <View style={styles.descError}>
+                  <HelperText type="error" visible style={{ flex: 1 }}>No se pudo leer la descripción actual.</HelperText>
+                  <Button compact mode="text" onPress={() => loadProductDescription(editProduct.productId)}>Reintentar</Button>
+                </View>
+              )}
 
               <View style={styles.modalActions}>
-                <Button mode="outlined" onPress={() => setProductModal(false)} style={{ flex: 1 }}>Cancelar</Button>
-                <Button mode="contained" onPress={handleSaveProduct} loading={productSaving} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Guardar</Button>
+                <Button mode="outlined" onPress={closeProductModal} disabled={productSaving} style={{ flex: 1 }}>Cancelar</Button>
+                <Button mode="contained" onPress={handleSaveProduct} loading={productSaving} disabled={productSaving} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Guardar</Button>
               </View>
             </View>
           </ScrollView>
@@ -911,7 +1045,9 @@ const InventoryScreen = () => {
         title={confirmDlg?.title ?? ''}
         message={confirmDlg?.message ?? ''}
         confirmLabel="Sí, confirmar"
-        onConfirm={() => confirmDlg?.onConfirm()}
+        // I-02: cerrar primero y después ejecutar (antes un doble toque mandaba dos pedidos:
+        // dos toggles dejaban el producto como estaba).
+        onConfirm={() => { const fn = confirmDlg?.onConfirm; setConfirmDlg(null); fn?.(); }}
         onCancel={() => setConfirmDlg(null)}
       />
       <Snackbar visible={!!snackbar} onDismiss={() => setSnackbar('')} duration={2500}>{snackbar}</Snackbar>
@@ -952,6 +1088,8 @@ const styles = StyleSheet.create({
   searchRow:          { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SPACE.s3, paddingVertical: SPACE.s2, gap: SPACE.s2 },
   searchBox:          { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: COLOR.surface, borderRadius: RADIUS.r2, borderWidth: 1, borderColor: COLOR.border, paddingHorizontal: SPACE.s3, height: CONTROL.inputH - 8 },
   searchInput:        { flex: 1, fontSize: FONT_SIZE.body, color: COLOR.ink, outlineStyle: 'none' } as any,
+  catChip:            { flexDirection: 'row', alignItems: 'center', gap: SPACE.s1, maxWidth: 200, backgroundColor: COLOR.brandTint, borderWidth: 1, borderColor: COLOR.brand, borderRadius: RADIUS.full, paddingHorizontal: SPACE.s3, paddingVertical: 6 },
+  catChipText:        { flexShrink: 1, fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.brandDeep },
 
   // Layout principal
   main:               { flex: 1, flexDirection: 'column' },
@@ -1046,6 +1184,8 @@ const styles = StyleSheet.create({
   modalStock:         { fontSize: FONT_SIZE.label, color: COLOR.inkMute, marginBottom: SPACE.s4 },
   typeRow:            { flexDirection: 'row', gap: SPACE.s2, marginBottom: SPACE.s3 },
   input:              { marginBottom: SPACE.s2 },
+  helperTight:        { marginTop: -SPACE.s2 },
+  descError:          { flexDirection: 'row', alignItems: 'center', marginTop: -SPACE.s2 },
   fieldLabel:         { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.inkMute, marginBottom: SPACE.s2 },
   catPickerBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: COLOR.border2, borderRadius: RADIUS.r2, paddingHorizontal: SPACE.s4, paddingVertical: SPACE.s3, marginBottom: SPACE.s2, backgroundColor: COLOR.surface },
   catPickerValue:     { flex: 1, fontSize: FONT_SIZE.body, color: COLOR.ink, fontWeight: FONT_WEIGHT.medium as any },
