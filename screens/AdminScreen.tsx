@@ -29,6 +29,7 @@ import { formatCurrency, formatNumber, formatAmountInput, parseFormattedNumber }
 import ImageViewer from '../components/ImageViewer';
 import ImageButton from '../components/ImageButton';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../theme';
+import { useMoney, useTenantConfig } from '../context/TenantConfigContext';
 
 const TRANSACTION_LABELS: Record<Transaction['type'], string> = {
   income: 'Ingreso',
@@ -177,8 +178,8 @@ const KpiRow = ({ transactions }: { transactions: Transaction[] }) => {
   const balance      = totalIncome - totalExpense;
   const promedio     = balance / 30;
 
-  const L = (v: number) =>
-    `L ${Math.abs(v).toLocaleString('es-HN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const money = useMoney();
+  const L = (v: number) => money(Math.abs(v));
 
   return (
     <View style={styles.kpiRow}>
@@ -365,6 +366,8 @@ const CompactDateFilters = ({
 };
 
 const AdminScreen = () => {
+  const money = useMoney();
+  const { currency } = useTenantConfig();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [startDate, setStartDate] = useState<Date | undefined>();
@@ -1218,7 +1221,7 @@ const buildImageUrl = (imagePath: string | undefined): string | null => {
       item.description || null,
     ].filter(Boolean);
 
-    const amtStr = `L ${item.amount.toLocaleString('es-HN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const amtStr = money(item.amount);
     const imageUri = item.imageUri || (item as any).image_uri;
 
     return (
@@ -1257,7 +1260,7 @@ const buildImageUrl = (imagePath: string | undefined): string | null => {
           <Text style={[styles.txAmt, { color: txColor }]}>
             {isIncome ? '+' : '-'}{amtStr}
           </Text>
-          <Text style={styles.txAmtLabel}>LEMPIRAS</Text>
+          {currency ? <Text style={styles.txAmtLabel}>{currency}</Text> : null}
         </View>
 
         {/* Acciones */}

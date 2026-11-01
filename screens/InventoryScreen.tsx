@@ -12,8 +12,9 @@ import { useStore } from '../context/StoreContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useAuth } from '../context/AuthContext';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, CONTROL } from '../theme';
-import { formatHnl } from '../utils/format';
 import { stockColor } from '../utils/stockStatus';
+import { useMoney } from '../context/TenantConfigContext';
+import { APP_LOCALE } from '../utils/format';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -252,6 +253,7 @@ const KpiCard = ({ icon, title, value, sub, warn }: { icon: string; title: strin
 // ─── Screen principal ─────────────────────────────────────────────────────────
 
 const InventoryScreen = () => {
+  const money = useMoney();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
 
@@ -537,8 +539,8 @@ const InventoryScreen = () => {
         {m.type === 'ENTRADA' ? '+' : '-'}{m.quantity}
       </Text>
       <Text style={styles.movDate}>
-        {new Date(m.createdAt).toLocaleDateString('es-HN', { day: '2-digit', month: '2-digit' })}{'\n'}
-        {new Date(m.createdAt).toLocaleTimeString('es-HN', { hour: '2-digit', minute: '2-digit' })}
+        {new Date(m.createdAt).toLocaleDateString(APP_LOCALE, { day: '2-digit', month: '2-digit' })}{'\n'}
+        {new Date(m.createdAt).toLocaleTimeString(APP_LOCALE, { hour: '2-digit', minute: '2-digit' })}
       </Text>
     </View>
   );
@@ -558,7 +560,7 @@ const InventoryScreen = () => {
       </View>
 
       {/* Precio */}
-      <Text style={styles.rowPrice}>{formatHnl(item.price)}</Text>
+      <Text style={styles.rowPrice}>{money(item.price)}</Text>
 
       {/* Stock badge */}
       <View style={[styles.stockBadge, { backgroundColor: stockColor(item) + '18' }]}>
@@ -670,7 +672,7 @@ const InventoryScreen = () => {
               <KpiCard icon="package-variant" title="Productos activos" value={String(summary.activeProducts)} sub={`de ${summary.totalProducts} totales`} />
               <KpiCard icon="alert-circle-outline" title="Stock bajo" value={String(summary.lowStockCount)} warn={summary.lowStockCount > 0} />
               <KpiCard icon="folder-outline" title="Categorías" value={String(summary.categoryCount)} />
-              <KpiCard icon="cash-multiple" title="Valor estimado" value={formatHnl(summary.estimatedValue)} />
+              <KpiCard icon="cash-multiple" title="Valor estimado" value={money(summary.estimatedValue)} />
             </View>
           )}
         </>

@@ -6,6 +6,7 @@ import { TextInput, Button, HelperText, Divider } from 'react-native-paper';
 import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
 import { COLOR, SPACE, FONT_SIZE, FONT_WEIGHT, RADIUS, SHADOW } from '../theme';
+import { useTenantConfig } from '../context/TenantConfigContext';
 
 interface TenantConfig {
   companyName: string;
@@ -31,6 +32,7 @@ const TIMEZONES = [
 ];
 
 const TenantConfigScreen = () => {
+  const { refreshTenantConfig } = useTenantConfig();
   const [config, setConfig]     = useState<TenantConfig>({
     companyName: '',
     currency:    '',
@@ -64,6 +66,7 @@ const TenantConfigScreen = () => {
     setSuccess('');
     try {
       await axios.put(`${REACT_APP_API_URL}/api/v3/tenant/config`, config);
+      await refreshTenantConfig();
       setSuccess('Configuración guardada correctamente');
     } catch (e: any) {
       if (e?.response?.status === 403) setError('Solo el owner puede modificar la configuración');
@@ -110,7 +113,7 @@ const TenantConfigScreen = () => {
         placeholder: 'Ej. L, $, S/, COP',
         hint: 'Símbolo que se usa al mostrar montos en reportes y pantallas.',
       })}
-      {field('Dirección', 'address', { placeholder: 'Ej. Col. Palmira, Tegucigalpa' })}
+      {field('Dirección', 'address', { placeholder: 'Ej. Av. Principal 123, Ciudad' })}
       {field('Teléfono', 'phone', { placeholder: 'Ej. +504 9999-9999' })}
 
       <Divider style={styles.divider} />
