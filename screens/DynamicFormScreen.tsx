@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -9,8 +9,8 @@ import {
   StatusBar,
   TouchableOpacity,
   Text,
-  Image,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import {
   TextInput,
@@ -18,32 +18,92 @@ import {
   RadioButton,
   Card,
   Title,
-  Avatar,
   HelperText,
   Chip,
+  Portal,
+  Dialog,
 } from 'react-native-paper';
 import { DatePickerModal } from 'react-native-paper-dates';
 import { format } from 'date-fns';
-import ResponsiveButton from '../components/ui/responsiveButton';
+import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
 import StoreSelector from '../components/StoreSelector';
 import { useAuth } from '../context/AuthContext';
-import { formatDate } from '../utils/format';
+import { useStore } from '../context/StoreContext';
+import { isPrivileged } from '../config/navConfig';
+import { formatDateOnly } from '../utils/dateOnly';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import { formatAmountInput, parseFormattedNumber } from '../utils/numberFormat';
-import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../theme';
+import { formatAmountInput } from '../utils/numberFormat';
+import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, BREAKPOINT } from '../theme';
 import { ImageService } from '../utils/ImageService';
 import ImagePicker from '../components/ImagePicker';
 import { useMoney } from '../context/TenantConfigContext';
+import { apiErrorMessage, isForbidden, httpStatus, NO_PERMISSION_MESSAGE } from '../utils/apiError';
+import { fetchStoreAssignment, resolveAssignedStore, type StoreAssignment } from '../utils/assignedStore';
 
 const BACKEND_URL = `${REACT_APP_API_URL}/api/forms`;
 const TRANSACTIONS_URL = `${REACT_APP_API_URL}/transactions`;
+const API_TIMEOUT = 20000;
+
+type FormType = 'transaction' | 'closing-deposits' | 'supplier-payments' | 'salary-payments' | 'gasto-admin';
+
+const FORM_TYPE_OPTIONS: { value: FormType; label: string }[] = [
+  { value: 'transaction',       label: 'Transacción' },
+  { value: 'gasto-admin',       label: 'Gasto Administrativo' },
+  { value: 'closing-deposits',  label: 'Depósito de Cierres' },
+  { value: 'supplier-payments', label: 'Pago a Proveedores' },
+  { value: 'salary-payments',   label: 'Salarios' },
+];
+
+/**
+ * F-02 — qué puede registrar un cajero (staff sin canManageUsers, ver isPrivileged en
+ * config/navConfig.ts). Criterio seguro mientras el negocio no defina otra cosa:
+ *  - solo "Depósito de Cierres" (el depósito de la caja de SU local);
+ *  - nada de Gasto Administrativo (se reparte entre TODOS los locales), Ingresos/Egresos
+ *    sueltos, Salarios ni Pagos a Proveedores: son movimientos de gestión.
+ *  - el local es el asignado en su perfil (misma regla que UserDashboard, P-01), sin
+ *    selector; si no se puede confirmar, no se puede registrar.
+ * No se inventa ningún permiso nuevo: para ampliar, agregar el tipo a esta lista.
+ * El backend (/api/forms/*) hoy solo exige el módulo OPERATIONS y no valida tipo ni local.
+ */
+const CASHIER_FORM_TYPES: FormType[] = ['closing-deposits'];
 
 const DynamicFormScreen = () => {
-  const { userName, accessToken } = useAuth();
+  const { userName, roles, canManageUsers } = useAuth();
+  const isCashier = !isPrivileged({ roles, canManageUsers });
+  const { stores, loadingStores, refreshStores } = useStore();
   const money = useMoney();
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= BREAKPOINT.desktop;
   const [knownSuppliers, setKnownSuppliers] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'form' | 'historial'>('form');
+
+  // ── F-02: local fijo del cajero ─────────────────────────────────────────────
+  const [assignment, setAssignment] = useState<StoreAssignment | null>(null);
+  const [assignmentStatus, setAssignmentStatus] = useState<'loading' | 'ok' | 'notFound' | 'error'>('loading');
+  const [assignmentAttempt, setAssignmentAttempt] = useState(0);
+  useEffect(() => {
+    if (!isCashier) return;
+    if (!userName) { setAssignmentStatus('error'); return; }
+    let cancelled = false;
+    setAssignmentStatus('loading');
+    fetchStoreAssignment(userName)
+      .then(p => { if (!cancelled) { setAssignment(p); setAssignmentStatus('ok'); } })
+      .catch(e => { if (!cancelled) setAssignmentStatus(httpStatus(e) === 404 ? 'notFound' : 'error'); });
+    return () => { cancelled = true; };
+  }, [isCashier, userName, assignmentAttempt]);
+  const assignedStore = isCashier && assignmentStatus === 'ok' ? resolveAssignedStore(assignment, stores) : null;
+  const cashierStoreError: string | null = !isCashier || assignmentStatus === 'loading' || loadingStores
+    ? null
+    : assignmentStatus === 'error'
+      ? 'No pudimos confirmar en qué local trabajás. Revisá la conexión e intentá de nuevo.'
+      : !assignedStore
+        ? 'Tu usuario no tiene un local activo asignado. Pedí al administrador que te asigne uno.'
+        : null;
+  const retryAssignment = () => { refreshStores(); setAssignmentAttempt(a => a + 1); };
+  const allowedFormTypes = isCashier
+    ? FORM_TYPE_OPTIONS.filter(o => CASHIER_FORM_TYPES.includes(o.value))
+    : FORM_TYPE_OPTIONS;
 
   // ── Historial de operaciones del usuario ────────────────────────────────────
   interface OperacionHistorial {
@@ -54,23 +114,28 @@ const DynamicFormScreen = () => {
   const [histLoading, setHistLoading]     = useState(false);
   const [histPage, setHistPage]           = useState(0);
   const [histHasMore, setHistHasMore]     = useState(true);
+  const [histError, setHistError]         = useState('');
   const HIST_SIZE = 20;
 
+  // F-07: axios (token + refresco automático). Antes `fetch` sin chequear res.ok: un
+  // objeto de error rompía `[...prev, ...data]` y el fallo quedaba en silencio.
   const loadHistorial = useCallback(async (reset = false) => {
     if (!userName || histLoading) return;
     setHistLoading(true);
+    setHistError('');
     const page = reset ? 0 : histPage;
     try {
-      const res = await fetch(
-        `${REACT_APP_API_URL}/api/operations/mine?username=${userName}&page=${page}&size=${HIST_SIZE}`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
+      const { data } = await axios.get<OperacionHistorial[]>(
+        `${REACT_APP_API_URL}/api/operations/mine`,
+        { params: { username: userName, page, size: HIST_SIZE }, timeout: API_TIMEOUT }
       );
-      const data: OperacionHistorial[] = await res.json();
-      setHistorial(prev => reset ? data : [...prev, ...data]);
+      const rows = Array.isArray(data) ? data : [];
+      setHistorial(prev => reset ? rows : [...prev, ...rows]);
       setHistPage(page + 1);
-      setHistHasMore(data.length === HIST_SIZE);
-    } catch { /* silencioso */ }
-    finally { setHistLoading(false); }
+      setHistHasMore(rows.length === HIST_SIZE);
+    } catch (e) {
+      setHistError(isForbidden(e) ? NO_PERMISSION_MESSAGE : apiErrorMessage(e, 'No se pudo cargar tu historial.'));
+    } finally { setHistLoading(false); }
   }, [userName, histPage, histLoading]);
 
   useEffect(() => {
@@ -139,17 +204,34 @@ const DynamicFormScreen = () => {
     endDate: undefined,
   });
 
-  const [formType, setFormType] = useState<'transaction' | 'closing-deposits' | 'supplier-payments' | 'salary-payments' | 'gasto-admin' | ''>('');
+  const [formType, setFormType] = useState<FormType | ''>('');
   const [showMessageCard, setShowMessageCard] = useState(false);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState<'success' | 'error'>('success');
   const slideAnim = useState(new Animated.Value(-100))[0];
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [errors, setErrors] = useState<{ [key: string]: boolean }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   useEffect(() => {
     setFormData(prevData => ({ ...prevData, date: getCurrentFormattedDate() }));
   }, []);
+
+  // F-02: el cajero tiene un solo tipo permitido → queda elegido; si por algún motivo
+  // el tipo actual no está permitido, se descarta.
+  useEffect(() => {
+    if (!isCashier) return;
+    if (formType && !CASHIER_FORM_TYPES.includes(formType)) setFormType('');
+    if (!formType && CASHIER_FORM_TYPES.length === 1) setFormType(CASHIER_FORM_TYPES[0]);
+  }, [isCashier, formType]);
+
+  // F-02: el local del cajero es siempre el asignado (sin selector).
+  useEffect(() => {
+    if (isCashier) {
+      setFormData(prev => ({ ...prev, storeId: assignedStore?.id ?? 0 }));
+    }
+  }, [isCashier, assignedStore?.id]);
 
   // Proveedores que esta empresa ya usó (para sugerir). Si el usuario no tiene permiso de operaciones, queda vacío.
   useEffect(() => {
@@ -157,33 +239,38 @@ const DynamicFormScreen = () => {
     const end = new Date();
     const start = new Date(end.getFullYear() - 1, end.getMonth(), end.getDate());
     const iso = (d: Date) => format(d, 'yyyy-MM-dd');
-    fetch(`${BACKEND_URL}/supplier-payments?startDate=${iso(start)}&endDate=${iso(end)}`,
-      { headers: { Authorization: `Bearer ${accessToken}` } })
-      .then(r => (r.ok ? r.json() : []))
-      .then((rows: { supplier?: string | null }[]) => {
+    axios.get<{ supplier?: string | null }[]>(`${BACKEND_URL}/supplier-payments`, {
+      params: { startDate: iso(start), endDate: iso(end) },
+      timeout: API_TIMEOUT,
+    })
+      .then(({ data }) => {
+        const rows = Array.isArray(data) ? data : [];
         const names = Array.from(new Set(rows.map(r => (r.supplier ?? '').trim()).filter(Boolean)));
         setKnownSuppliers(names.sort((a, b) => a.localeCompare(b)));
       })
       .catch(() => setKnownSuppliers([]));
-  }, [formType, accessToken]);
+  }, [formType]);
 
   // Cargar locales activos y distribuir el porcentaje en partes iguales
-  useEffect(() => {
-    const STORES_URL = `${REACT_APP_API_URL}/api/v2/stores/active`;
-    fetch(STORES_URL, { headers: { Authorization: `Bearer ${accessToken}` } })
-      .then(r => r.json())
-      .then((stores: { id: number; name: string }[]) => {
-        if (!stores.length) return;
-        const base     = Math.floor(100 / stores.length);
-        const resto    = 100 - base * stores.length;
-        setDistribuciones(stores.map((s, i) => ({
+  // F-18: si no se pueden cargar, el Gasto admin lo explica (antes "actual: 0%").
+  const [distribStatus, setDistribStatus] = useState<'loading' | 'ok' | 'error'>('loading');
+  const loadDistribuciones = useCallback(() => {
+    setDistribStatus('loading');
+    axios.get<{ id: number; name: string }[]>(`${REACT_APP_API_URL}/api/v2/stores/active`, { timeout: API_TIMEOUT })
+      .then(({ data }) => {
+        const active = Array.isArray(data) ? data : [];
+        const base     = active.length ? Math.floor(100 / active.length) : 0;
+        const resto    = 100 - base * active.length;
+        setDistribuciones(active.map((s, i) => ({
           storeId:    s.id,
           nombre:     s.name,
           porcentaje: i === 0 ? base + resto : base,
         })));
+        setDistribStatus('ok');
       })
-      .catch(() => {});
+      .catch(() => setDistribStatus('error'));
   }, []);
+  useEffect(() => { loadDistribuciones(); }, [loadDistribuciones]);
 
   // Establecer tipo automáticamente para gasto-admin
   useEffect(() => {
@@ -192,6 +279,8 @@ const DynamicFormScreen = () => {
     }
   }, [formType]);
 
+  // F-13: el éxito se va a los 4 s; un error queda hasta que se lo toca (o 10 s), para
+  // poder leerlo. Un mensaje nuevo cancela el temporizador del anterior.
   const showMessage = (type: 'success' | 'error', message: string) => {
     setMessage(message);
     setMessageType(type);
@@ -203,10 +292,12 @@ const DynamicFormScreen = () => {
       useNativeDriver: true,
     }).start();
 
-    setTimeout(() => hideMessage(), 3000);
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => hideMessage(), type === 'success' ? 4000 : 10000);
   };
 
   const hideMessage = () => {
+    if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
     Animated.timing(slideAnim, {
       toValue: -100,
       duration: 300,
@@ -214,16 +305,19 @@ const DynamicFormScreen = () => {
     }).start(() => setShowMessageCard(false));
   };
 
+  useEffect(() => () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); }, []);
+
   const clearData = () => {
     const currentDate = getCurrentFormattedDate();
     handleInputChange('amount', '');
     handleInputChange('date', currentDate);
     handleInputChange('description', '');
-    handleInputChange('type', '');
+    handleInputChange('type', formType === 'gasto-admin' ? 'expense' : '');
     handleInputChange('closingsCount', '');
     handleInputChange('periodStart', '');
     handleInputChange('periodEnd', '');
-    handleInputChange('storeId', 0);
+    // F-02: el cajero conserva su local fijo.
+    handleInputChange('storeId', isCashier ? (assignedStore?.id ?? 0) : 0);
     handleInputChange('supplier', '');
     setSelectedImage(null);
     setDateRange({ startDate: undefined, endDate: undefined });
@@ -303,24 +397,26 @@ const DynamicFormScreen = () => {
     setDateRangePickerVisible(false);
   };
 
+  // F-01: antes solo se validaban Transacción (el tipo) y Gasto Administrativo; Depósitos,
+  // Proveedores y Salarios salían con monto 0, sin local (storeId 0) y sin período.
   const validateForm = () => {
     const newErrors: { [key: string]: boolean } = {};
+    const amount = parseFloat((formData.amount || '').replace(/,/g, ''));
+    const needsStore = formType !== 'gasto-admin';
 
-    // Validación para transacciones
-    if (formType === 'transaction' && !formData.type) {
-      newErrors.type = true;
+    if (formType === 'transaction' && !formData.type) newErrors.type = true;
+    if (!(amount > 0)) newErrors.amount = true;
+    if (!formData.date) newErrors.date = true;
+    if (needsStore && !formData.storeId) newErrors.storeId = true;
+    if (formType === 'supplier-payments' && !formData.supplier.trim()) newErrors.supplier = true;
+    if (formType === 'salary-payments' && !formData.description.trim()) newErrors.description = true;
+    if (formType === 'closing-deposits' && (!formData.periodStart || !formData.periodEnd)) {
+      newErrors.periodStart = true;
+      newErrors.periodEnd = true;
     }
-
-    // Validación para pagos a proveedores
-    if (formType === 'supplier-payments' && !formData.supplier.trim()) {
-      newErrors.supplier = true;
-    }
-
-    // Validación para gastos administrativos
     if (formType === 'gasto-admin') {
-      if (!formData.amount || parseFloat(formData.amount.replace(/,/g, '')) <= 0) newErrors.amount = true;
       if (!formData.description.trim()) newErrors.description = true;
-      if (!formData.date) newErrors.date = true;
+      if (distribuciones.length === 0) newErrors.porcentajes = true;
       const totalPct = distribuciones.reduce((s, d) => s + d.porcentaje, 0);
       if (totalPct !== 100) newErrors.porcentajes = true;
     }
@@ -335,13 +431,31 @@ const DynamicFormScreen = () => {
     }
 
     if (!formType) {
-      showMessage('error', 'Por favor, seleccione un tipo de operación.');
+      showMessage('error', 'Seleccioná un tipo de operación.');
+      return;
+    }
+
+    // F-02: el cajero solo registra los tipos permitidos y en su local asignado.
+    if (isCashier) {
+      if (!CASHIER_FORM_TYPES.includes(formType)) {
+        showMessage('error', 'No tenés permiso para registrar este tipo de operación.');
+        return;
+      }
+      if (!assignedStore) {
+        showMessage('error', cashierStoreError ?? 'No pudimos confirmar en qué local trabajás.');
+        return;
+      }
+    }
+
+    // F-16: nunca un usuario inventado ('default_user'): sin usuario no se envía.
+    if (!userName) {
+      showMessage('error', 'No pudimos identificar tu usuario. Cerrá sesión y volvé a entrar.');
       return;
     }
 
     const isValid = validateForm();
     if (!isValid) {
-      showMessage('error', 'Por favor complete todos los campos requeridos');
+      showMessage('error', 'Completá los campos marcados en rojo.');
       return;
     }
 
@@ -374,6 +488,8 @@ const DynamicFormScreen = () => {
 
       const amountValue = formData.amount ? formData.amount.replace(/,/g, '') : '0';
       const amount = parseFloat(amountValue);
+      // F-02: para el cajero el local sale siempre del perfil, no del estado del formulario.
+      const storeId = isCashier && assignedStore ? assignedStore.id : formData.storeId;
 
       const basePayload: any =
         formType === 'gasto-admin'
@@ -390,9 +506,12 @@ const DynamicFormScreen = () => {
             }
           : {
               ...formData,
+              storeId,
               amount,
-              store: { id: formData.storeId },
-              username: userName ?? 'default_user',
+              store: { id: storeId },
+              // F-16: el usuario real de la sesión (antes caía a 'default_user').
+              // Pendiente backend: tomar el autor del token y no del body.
+              username: userName,
               date: formData.date,
               salaryDate: formData.date,
               paymentDate: formData.date,
@@ -400,32 +519,26 @@ const DynamicFormScreen = () => {
               imageUri: imageUri,
             };
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify(basePayload),
+      // F-07: axios hereda el token y lo renueva solo ante un 401 (antes `fetch` con el
+      // token del contexto: vencido → "Error al enviar el formulario").
+      const { data: result } = await axios.post(url, basePayload, {
+        headers: { Accept: 'application/json' },
+        timeout: API_TIMEOUT,
       });
 
-      if (response.ok) {
-        if (formType === 'gasto-admin') {
-          const result = await response.json();
-          showMessage('success', `${result.mensaje} (ID: ${result.gastoAdminId})`);
-        } else {
-          showMessage('success', 'Datos enviados correctamente');
-        }
-        clearData();
-        setFormType('');
-        setErrors({});
-      } else {
-        const error = await response.json();
-        showMessage('error', error.message || 'Error al enviar el formulario');
-      }
+      // F-10: sin el "(ID: 123)" técnico.
+      showMessage('success', formType === 'gasto-admin'
+        ? (typeof result?.mensaje === 'string' && result.mensaje.trim() ? result.mensaje : 'Gasto administrativo registrado')
+        : 'Operación registrada');
+      // F-12: se conserva el tipo de operación para cargar la siguiente.
+      clearData();
+      setErrors({});
+      // F-08: "Mi historial" se recarga la próxima vez que se abre la pestaña.
+      setHistorial([]);
+      setHistPage(0);
+      setHistHasMore(true);
     } catch (error) {
-      showMessage('error', 'No se pudo conectar con el servidor');
+      showMessage('error', apiErrorMessage(error, 'No se pudo registrar la operación. Intentá de nuevo.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -468,6 +581,46 @@ const DynamicFormScreen = () => {
     </View>
   );
 
+  // F-02: el cajero ve su local fijo (sin selector); el resto elige con StoreSelector.
+  // F-01: error visible bajo el local en todos los tipos.
+  const renderStoreField = () => {
+    if (!isCashier) {
+      return (
+        <>
+          <StoreSelector
+            selectedStore={formData.storeId}
+            onStoreChange={(storeId) => handleInputChange('storeId', storeId)}
+            style={styles.storeSelector}
+          />
+          {errors.storeId && <HelperText type="error" visible>Seleccioná un local</HelperText>}
+        </>
+      );
+    }
+    if (assignmentStatus === 'loading' || loadingStores) {
+      return <ActivityIndicator size="small" color={COLOR.brand} style={{ marginVertical: SPACE.s3 }} />;
+    }
+    if (!assignedStore) {
+      return (
+        <View style={[styles.fixedStore, styles.fixedStoreError]}>
+          <MaterialCommunityIcons name="store-alert-outline" size={20} color={COLOR.expense} />
+          <Text style={styles.fixedStoreText}>{cashierStoreError}</Text>
+          <Button compact mode="text" textColor={COLOR.expense} onPress={retryAssignment}>Reintentar</Button>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.fixedStore}>
+        <MaterialCommunityIcons name="store-outline" size={20} color={COLOR.brandDark} />
+        <Text style={styles.fixedStoreText}>
+          Local: <Text style={{ fontWeight: FONT_WEIGHT.bold as any }}>{assignedStore.name}</Text>
+        </Text>
+      </View>
+    );
+  };
+
+  const renderAmountError = () =>
+    errors.amount ? <HelperText type="error" visible>El monto debe ser mayor a 0</HelperText> : null;
+
   const renderTransactionForm = () => (
     <>
       <Title style={styles.formSectionTitle}>Selecciona el tipo de transacción</Title>
@@ -498,11 +651,7 @@ const DynamicFormScreen = () => {
         </HelperText>
       )}
 
-      <StoreSelector
-        selectedStore={formData.storeId}
-        onStoreChange={(storeId) => handleInputChange('storeId', storeId)}
-        style={styles.storeSelector}
-      />
+      {renderStoreField()}
 
       <View style={styles.inputContainer}>
         <TextInput
@@ -518,6 +667,7 @@ const DynamicFormScreen = () => {
           activeOutlineColor={COLOR.brand}
           theme={{ colors: { primary: COLOR.brand } }}
         />
+        {renderAmountError()}
       </View>
 
       <View style={styles.inputContainer}>
@@ -525,6 +675,7 @@ const DynamicFormScreen = () => {
           label="Fecha"
           value={formData.date}
           mode="outlined"
+          showSoftInputOnFocus={false}
           onFocus={() => {
             setSelectedDateField('date');
             setDatePickerVisible(true);
@@ -572,7 +723,22 @@ const DynamicFormScreen = () => {
   const renderGastoAdminForm = () => {
     const montoNum   = parseFloat((formData.amount || '0').replace(/,/g, '')) || 0;
     const totalPct   = distribuciones.reduce((s, d) => s + d.porcentaje, 0);
-    const pctValidos = totalPct === 100;
+    const pctValidos = totalPct === 100 && distribuciones.length > 0;
+
+    // F-09: redondear cada parte a centavos y dejar el residuo en el último local, así la
+    // suma da exactamente el total (antes 33.33 × 3 = 99.99). Es solo la vista previa: el
+    // backend calcula su propio reparto (pendiente: que use la misma regla).
+    const totalCents = Math.round(montoNum * 100);
+    let assignedCents = 0;
+    const partes = new Map<number, number>();
+    distribuciones.forEach((d, i) => {
+      const isLast = i === distribuciones.length - 1;
+      const cents = isLast && pctValidos
+        ? totalCents - assignedCents
+        : Math.round((totalCents * d.porcentaje) / 100);
+      assignedCents += cents;
+      partes.set(d.storeId, cents / 100);
+    });
 
     return (
       <>
@@ -599,6 +765,7 @@ const DynamicFormScreen = () => {
             label="Fecha"
             value={formData.date}
             mode="outlined"
+            showSoftInputOnFocus={false}
             onFocus={() => { setSelectedDateField('date'); setDatePickerVisible(true); }}
             style={styles.input}
             error={errors.date}
@@ -650,14 +817,28 @@ const DynamicFormScreen = () => {
               </View>
               {montoNum > 0 && (
                 <Text style={styles.localAmount}>
-                  {money((montoNum * d.porcentaje) / 100)}
+                  {money(partes.get(d.storeId) ?? 0)}
                 </Text>
               )}
             </View>
           ))}
 
           <View style={styles.validationContainer}>
-            {pctValidos ? (
+            {distribStatus === 'loading' ? (
+              <ActivityIndicator size="small" color={COLOR.brand} />
+            ) : distribStatus === 'error' ? (
+              <View style={{ alignItems: 'center' }}>
+                <Text style={styles.validationError}>
+                  No se pudieron cargar los locales para repartir el gasto.
+                </Text>
+                <Button compact mode="text" textColor={COLOR.expense} onPress={loadDistribuciones}>Reintentar</Button>
+              </View>
+            ) : distribuciones.length === 0 ? (
+              // F-18: explicar por qué no se puede repartir (antes "actual: 0%").
+              <Text style={styles.validationError}>
+                No hay locales activos para repartir el gasto. Activá o creá un local primero.
+              </Text>
+            ) : pctValidos ? (
               <Text style={styles.validationSuccess}>Porcentajes válidos: {totalPct}%</Text>
             ) : (
               <Text style={styles.validationError}>
@@ -676,7 +857,7 @@ const DynamicFormScreen = () => {
             </Text>
             {distribuciones.map(d => (
               <Text key={d.storeId} style={styles.summaryText}>
-                • {d.nombre} ({d.porcentaje}%): {money((montoNum * d.porcentaje) / 100)}
+                • {d.nombre} ({d.porcentaje}%): {money(partes.get(d.storeId) ?? 0)}
               </Text>
             ))}
           </View>
@@ -695,11 +876,7 @@ const DynamicFormScreen = () => {
       case 'closing-deposits':
         return (
           <>
-            <StoreSelector
-              selectedStore={formData.storeId}
-              onStoreChange={(storeId) => handleInputChange('storeId', storeId)}
-              style={styles.storeSelector}
-            />
+            {renderStoreField()}
 
             <View style={styles.inputContainer}>
               <TextInput
@@ -729,6 +906,7 @@ const DynamicFormScreen = () => {
                 activeOutlineColor={COLOR.brand}
                 theme={{ colors: { primary: COLOR.brand } }}
               />
+              {renderAmountError()}
             </View>
 
             <View style={styles.inputContainer}>
@@ -762,6 +940,7 @@ const DynamicFormScreen = () => {
                   `${formData.periodStart} - ${formData.periodEnd}` :
                   ''}
                 mode="outlined"
+                showSoftInputOnFocus={false}
                 onFocus={() => {
                   setDateRangePickerVisible(true);
                 }}
@@ -787,11 +966,7 @@ const DynamicFormScreen = () => {
             <Title style={styles.formSectionTitle}>Proveedor</Title>
             {renderSupplierList()}
 
-            <StoreSelector
-              selectedStore={formData.storeId}
-              onStoreChange={(storeId) => handleInputChange('storeId', storeId)}
-              style={styles.storeSelector}
-            />
+            {renderStoreField()}
 
             <View style={styles.inputContainer}>
               <TextInput
@@ -807,12 +982,14 @@ const DynamicFormScreen = () => {
                 activeOutlineColor={COLOR.brand}
                 theme={{ colors: { primary: COLOR.brand } }}
               />
+              {renderAmountError()}
             </View>
             <View style={styles.inputContainer}>
               <TextInput
                 label="Fecha"
                 value={formData.date}
                 mode="outlined"
+                showSoftInputOnFocus={false}
                 onFocus={() => {
                   setSelectedDateField('date');
                   setDatePickerVisible(true);
@@ -845,11 +1022,7 @@ const DynamicFormScreen = () => {
       case 'salary-payments':
         return (
           <>
-            <StoreSelector
-              selectedStore={formData.storeId}
-              onStoreChange={(storeId) => handleInputChange('storeId', storeId)}
-              style={styles.storeSelector}
-            />
+            {renderStoreField()}
 
             <View style={styles.inputContainer}>
               <TextInput
@@ -863,7 +1036,9 @@ const DynamicFormScreen = () => {
                 outlineColor={COLOR.border2}
                 activeOutlineColor={COLOR.brand}
                 theme={{ colors: { primary: COLOR.brand } }}
+                placeholder="Ej.: quincena, nombre del empleado"
               />
+              {errors.description && <HelperText type="error" visible>Indicá a qué corresponde el pago</HelperText>}
             </View>
             <View style={styles.inputContainer}>
               <TextInput
@@ -879,12 +1054,14 @@ const DynamicFormScreen = () => {
                 activeOutlineColor={COLOR.brand}
                 theme={{ colors: { primary: COLOR.brand } }}
               />
+              {renderAmountError()}
             </View>
             <View style={styles.inputContainer}>
               <TextInput
                 label="Fecha"
                 value={formData.date}
                 mode="outlined"
+                showSoftInputOnFocus={false}
                 onFocus={() => {
                   setSelectedDateField('date');
                   setDatePickerVisible(true);
@@ -918,13 +1095,31 @@ const DynamicFormScreen = () => {
     CLOSING:  'Cierre',
     SUPPLIER: 'Proveedor',
     SALARY:   'Salario',
+    GASTO_ADMIN: 'Gasto administrativo',
     income:   'Ingreso',
     expense:  'Egreso',
   };
 
   const renderHistorial = () => (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: SPACE.s4, gap: SPACE.s2 }}>
-      {historial.length === 0 && !histLoading && (
+      {/* F-08: el error se muestra (antes quedaba "No tenés operaciones" en silencio) */}
+      {!!histError && !histLoading && (
+        <View style={{ alignItems: 'center', paddingVertical: SPACE.s6 }}>
+          <MaterialCommunityIcons
+            name={histError === NO_PERMISSION_MESSAGE ? 'lock-outline' : 'alert-circle-outline'}
+            size={36}
+            color={COLOR.expense}
+          />
+          <Text style={{ color: COLOR.ink2, marginTop: SPACE.s2, fontSize: FONT_SIZE.body, textAlign: 'center' }}>
+            {histError}
+          </Text>
+          <Button compact mode="text" textColor={COLOR.brandDark} onPress={() => loadHistorial(historial.length === 0)}>
+            Reintentar
+          </Button>
+        </View>
+      )}
+
+      {historial.length === 0 && !histLoading && !histError && (
         <View style={{ alignItems: 'center', paddingVertical: SPACE.s8 }}>
           <MaterialCommunityIcons name="clipboard-text-outline" size={40} color={COLOR.inkDisabled} />
           <Text style={{ color: COLOR.inkMute, marginTop: SPACE.s2, fontSize: FONT_SIZE.body }}>
@@ -953,7 +1148,7 @@ const DynamicFormScreen = () => {
               {op.description ? (
                 <Text style={histStyles.desc} numberOfLines={1}>{op.description}</Text>
               ) : null}
-              <Text style={histStyles.date}>{op.date ? formatDate(op.date) : ''}</Text>
+              <Text style={histStyles.date}>{op.date ? formatDateOnly(op.date) : ''}</Text>
             </View>
             <Text style={[histStyles.amount, { color: isIncome ? COLOR.income : COLOR.expense }]}>
               {isIncome ? '+' : '-'}{money(op.amount)}
@@ -963,7 +1158,7 @@ const DynamicFormScreen = () => {
         );
       })}
 
-      {histHasMore && (
+      {histHasMore && !histError && (
         <TouchableOpacity style={histStyles.loadMore} onPress={() => loadHistorial(false)} disabled={histLoading}>
           {histLoading
             ? <ActivityIndicator size="small" color={COLOR.brand} />
@@ -984,9 +1179,12 @@ const DynamicFormScreen = () => {
     >
       <StatusBar barStyle="dark-content" backgroundColor={COLOR.brandTint} />
 
-      <View style={styles.topSection}>
-        <Title style={styles.welcomeText}>Operaciones</Title>
-      </View>
+      {/* F-17: en celular la barra superior del panel ya dice "Operaciones". */}
+      {isDesktop && (
+        <View style={styles.topSection}>
+          <Title style={styles.welcomeText}>Operaciones</Title>
+        </View>
+      )}
 
       {/* ── Tabs ── */}
       <View style={tabStyles.bar}>
@@ -1012,77 +1210,66 @@ const DynamicFormScreen = () => {
           <Card.Content>
             <Title style={styles.cardTitle}>Formulario de Operaciones</Title>
 
-            <Title style={styles.formSectionTitle}>Seleccione tipo de operación</Title>
-            
-            <RadioButton.Group
-              onValueChange={(value: any) => setFormType(value)}
-              value={formType}
-            >
-              <View style={styles.operationTypeContainer}>
-                <RadioButton.Item
-                  label="Transacción"
-                  value="transaction"
-                  style={styles.radioItem}
-                  labelStyle={styles.radioLabel}
-                  color={COLOR.brandDark}
-                />
-                <RadioButton.Item
-                  label="Gasto Administrativo"
-                  value="gasto-admin"
-                  style={styles.radioItem}
-                  labelStyle={styles.radioLabel}
-                  color={COLOR.brandDark}
-                />
-                <RadioButton.Item
-                  label="Depósito de Cierres"
-                  value="closing-deposits"
-                  style={styles.radioItem}
-                  labelStyle={styles.radioLabel}
-                  color={COLOR.brandDark}
-                />
-                <RadioButton.Item
-                  label="Pago a Proveedores"
-                  value="supplier-payments"
-                  style={styles.radioItem}
-                  labelStyle={styles.radioLabel}
-                  color={COLOR.brandDark}
-                />
-                <RadioButton.Item
-                  label="Salarios"
-                  value="salary-payments"
-                  style={styles.radioItem}
-                  labelStyle={styles.radioLabel}
-                  color={COLOR.brandDark}
-                />
-              </View>
-            </RadioButton.Group>
+            {/* F-02: el cajero solo ve los tipos permitidos (con uno solo, no hay que elegir). */}
+            {allowedFormTypes.length > 1 ? (
+              <>
+                <Title style={styles.formSectionTitle}>Seleccioná el tipo de operación</Title>
+                <RadioButton.Group
+                  onValueChange={(value: string) => {
+                    if (allowedFormTypes.some(o => o.value === value)) {
+                      setFormType(value as FormType);
+                      setErrors({});
+                    }
+                  }}
+                  value={formType}
+                >
+                  <View style={styles.operationTypeContainer}>
+                    {allowedFormTypes.map(o => (
+                      <RadioButton.Item
+                        key={o.value}
+                        label={o.label}
+                        value={o.value}
+                        style={styles.radioItem}
+                        labelStyle={styles.radioLabel}
+                        color={COLOR.brandDark}
+                      />
+                    ))}
+                  </View>
+                </RadioButton.Group>
+              </>
+            ) : (
+              <Title style={styles.formSectionTitle}>{allowedFormTypes[0]?.label}</Title>
+            )}
 
             {renderFormFields()}
-            
+
             <View style={styles.buttonContainer}>
+              {/* G-01: disabled junto a loading. F-11: color de marca y sin MAYÚSCULAS. */}
               <Button
                 mode="contained"
                 onPress={handleSubmit}
-                disabled={isSubmitting}
+                disabled={isSubmitting || (isCashier && !assignedStore)}
                 loading={isSubmitting}
                 style={styles.submitButton}
                 contentStyle={styles.buttonContent}
                 labelStyle={styles.buttonText}
-                buttonColor={COLOR.info}
+                buttonColor={COLOR.brand}
+                textColor={COLOR.inkOnBrand}
               >
-                {isSubmitting ? 'ENVIANDO...' : 'ENVIAR'}
+                {isSubmitting ? 'Enviando…' : 'Enviar'}
               </Button>
 
+              {/* F-11: acción secundaria (contorno) y con confirmación: antes borraba todo sin preguntar. */}
               <Button
-                mode="contained"
-                onPress={clearData}
+                mode="outlined"
+                onPress={() => setConfirmClear(true)}
+                disabled={isSubmitting}
                 style={styles.clearButton}
                 contentStyle={styles.buttonContent}
-                labelStyle={styles.buttonText}
-                buttonColor={COLOR.warn}
-              icon="refresh"
+                textColor={COLOR.ink2}
+                icon="refresh"
               >
-                LIMPIAR FORMULARIO
+                Limpiar formulario
               </Button>
             </View>
           </Card.Content>
@@ -1108,22 +1295,54 @@ const DynamicFormScreen = () => {
         locale="es"
         startDate={dateRange.startDate}
         endDate={dateRange.endDate}
+        // F-04: el período de un depósito no puede ser futuro.
+        validRange={{ startDate: undefined, endDate: new Date() }}
       />
 
+      {/* F-11 / G-02: confirmar antes de limpiar; el diálogo se cierra antes de ejecutar. */}
+      <Portal>
+        <Dialog visible={confirmClear} onDismiss={() => setConfirmClear(false)}>
+          <Dialog.Title>¿Limpiar el formulario?</Dialog.Title>
+          <Dialog.Content>
+            <Text style={{ color: COLOR.ink2, fontSize: FONT_SIZE.body }}>
+              Se borran los datos cargados. El tipo de operación se mantiene.
+            </Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setConfirmClear(false)} textColor={COLOR.ink2}>Cancelar</Button>
+            <Button
+              onPress={() => { setConfirmClear(false); clearData(); setErrors({}); }}
+              textColor={COLOR.expense}
+            >
+              Limpiar
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+
+      {/* F-13: el aviso va abajo (no tapa las pestañas) y se cierra al tocarlo. */}
       {showMessageCard && (
         <Animated.View
           style={[
             styles.messageCard,
             {
-              transform: [{ translateY: slideAnim }],
+              transform: [{ translateY: Animated.multiply(slideAnim, -1) }],
             },
           ]}
         >
-          <Card style={messageType === 'success' ? styles.successCard : styles.errorCard}>
-            <Card.Content>
-              <Title style={styles.messageText}>{message}</Title>
-            </Card.Content>
-          </Card>
+          <TouchableOpacity activeOpacity={0.9} onPress={hideMessage} accessibilityRole="button" accessibilityLabel="Cerrar aviso">
+            <Card style={messageType === 'success' ? styles.successCard : styles.errorCard}>
+              <Card.Content style={{ flexDirection: 'row', alignItems: 'center', gap: SPACE.s2 }}>
+                <MaterialCommunityIcons
+                  name={messageType === 'success' ? 'check-circle-outline' : 'alert-circle-outline'}
+                  size={22}
+                  color={COLOR.white}
+                />
+                <Text style={[styles.messageText, { flex: 1 }]}>{message}</Text>
+                <MaterialCommunityIcons name="close" size={18} color={COLOR.white} />
+              </Card.Content>
+            </Card>
+          </TouchableOpacity>
         </Animated.View>
       )}
     </KeyboardAvoidingView>
@@ -1225,11 +1444,33 @@ const styles = StyleSheet.create({
   },
   messageCard: {
     position: 'absolute',
-    top: 0,
+    bottom: 0,
     left: 0,
     right: 0,
     padding: SPACE.s4,
     zIndex: 2,
+  },
+  // F-02: local fijo del cajero
+  fixedStore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE.s2,
+    marginBottom: SPACE.s4,
+    paddingHorizontal: SPACE.s3,
+    paddingVertical: SPACE.s3,
+    borderRadius: RADIUS.r2,
+    borderWidth: 1,
+    borderColor: COLOR.border2,
+    backgroundColor: COLOR.surface,
+  },
+  fixedStoreError: {
+    borderColor: COLOR.expenseBorder,
+    backgroundColor: COLOR.expenseTint,
+  },
+  fixedStoreText: {
+    flex: 1,
+    fontSize: FONT_SIZE.body,
+    color: COLOR.ink,
   },
   successCard: {
     backgroundColor: COLOR.income,

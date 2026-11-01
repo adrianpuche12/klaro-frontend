@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,10 +7,8 @@ import {
   useWindowDimensions,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   Modal,
   type ViewStyle,
-  Animated,
   Image,
 } from 'react-native';
 import { Card } from 'react-native-paper';
@@ -20,17 +18,28 @@ import { ThemedText } from '../components/ThemedText';
 import { Button, TextInput, Snackbar, IconButton, SegmentedButtons } from 'react-native-paper';
 import { DatePickerModal } from 'react-native-paper-dates';
 import { useFocusEffect } from '@react-navigation/native';
-import LogoutButton from '../components/LogoutButton';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
+import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
 import { format, parseISO } from 'date-fns';
 import ExcelManager from '../components/ExcelManager';
-import { formatCurrency, formatNumber, formatAmountInput, parseFormattedNumber } from '../utils/numberFormat';
-import ImageViewer from '../components/ImageViewer';
-import ImageButton from '../components/ImageButton';
+import { formatAmountInput } from '../utils/numberFormat';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../theme';
 import { useMoney, useTenantConfig } from '../context/TenantConfigContext';
-import { apiFetch } from '../utils/apiFetch';
+import { formatTime } from '../utils/format';
+import { formatDateOnly, hasTime, daysInRange } from '../utils/dateOnly';
+import { apiErrorMessage, isForbidden, NO_PERMISSION_MESSAGE } from '../utils/apiError';
+
+/*
+ * Revisión 06 — Operaciones (pantalla "Finanzas").
+ * O-01: todas las llamadas usan axios. AuthContext deja el token en axios.defaults y un
+ * interceptor lo renueva ante un 401 y reintenta el pedido; `apiFetch` solo copiaba el
+ * header (sin refresco), así que con el token vencido la pantalla quedaba vacía.
+ * Un 403 se muestra como "No tenés permiso" (no como lista vacía): el menú habilita
+ * Finanzas con TRANSACTIONS/SALARY_PAYMENTS/SUPPLIER_PAYMENTS, pero /api/operations/*
+ * exige OPERATIONS — decisión de negocio pendiente, no se resuelve acá.
+ */
+const API_TIMEOUT = 20000;
 
 const TRANSACTION_LABELS: Record<Transaction['type'], string> = {
   income: 'Ingreso',
@@ -64,83 +73,26 @@ interface Transaction {
   };
   // Nuevo campo para la URL de la imagen
   imageUri?: string;
+  /** Autor de la operación (AllOperationsDTO.username). Se reenvía tal cual al editar (O-03). */
+  username?: string;
 }
 
 
-const ITEMS_PER_PAGE = 5;
+// O-06: antes 5 por página → decenas de páginas.
+const ITEMS_PER_PAGE = 25;
 
-const CollapsibleBalanceCard = ({ transactions }: { transactions: any[] }) => {
-  const [isCollapsed, setIsCollapsed] = React.useState(true);
-  const animatedHeight = useRef(new Animated.Value(0)).current;
+const INCOME_TYPES_ALL: Transaction['type'][] = ['income', 'CLOSING'];
+const EXPENSE_TYPES_ALL: Transaction['type'][] = ['expense', 'SALARY', 'SUPPLIER', 'GASTO_ADMIN', 'gasto_admin'];
 
-  React.useEffect(() => {
-    Animated.timing(animatedHeight, {
-      toValue: isCollapsed ? 0 : 1,
-      duration: 300,
-      useNativeDriver: false,
-    }).start();
-  }, [isCollapsed]);
-
+// O-15: se borró CollapsibleBalanceCard (sin uso). BalanceCard sí se usa en los filtros;
+// formateaba con "L" fijo (formatCurrency) → ahora usa la moneda de la empresa.
+const BalanceCard = ({ transactions }: { transactions: Transaction[] }) => {
+  const money = useMoney();
   const ingresos = transactions
-    .filter(tx => tx.type === 'CLOSING' || tx.type === 'income')
+    .filter(tx => INCOME_TYPES_ALL.includes(tx.type))
     .reduce((sum, tx) => sum + tx.amount, 0);
   const egresos = transactions
-    .filter(tx => tx.type === 'SUPPLIER' || tx.type === 'SALARY' || tx.type === 'GASTO_ADMIN' || tx.type === 'expense' || tx.type === 'gasto_admin')
-    .reduce((sum, tx) => sum + tx.amount, 0);
-  const total = ingresos - egresos;
-
-  const balanceContainerHeight = animatedHeight.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 160]
-  });
-
-  return (
-    <Card style={styles.balanceCard}>
-      <TouchableOpacity
-        style={styles.balanceHeaderContainer}
-        onPress={() => setIsCollapsed(!isCollapsed)}
-      >
-        <Title style={styles.balanceTitle}>Balance General</Title>
-        <IconButton
-          icon={isCollapsed ? "chevron-down" : "chevron-up"}
-          size={24}
-          onPress={() => setIsCollapsed(!isCollapsed)}
-        />
-      </TouchableOpacity>
-
-      <Animated.View style={[
-        styles.balanceContentContainer,
-        {
-          height: balanceContainerHeight,
-          opacity: animatedHeight
-        }
-      ]}>
-        <View style={styles.balanceRow}>
-          <MaterialCommunityIcons name="arrow-down-bold-circle-outline" size={20} color={COLOR.income} />
-          <Text style={styles.balanceLabel}>Ingresos:</Text>
-          <Text style={styles.balanceValue}>{formatCurrency(ingresos)}</Text>
-        </View>
-        <View style={styles.balanceRow}>
-          <MaterialCommunityIcons name="arrow-up-bold-circle-outline" size={20} color={COLOR.expense} />
-          <Text style={styles.balanceLabel}>Egresos:</Text>
-          <Text style={styles.balanceValue}>{formatCurrency(egresos)}</Text>
-        </View>
-        <View style={styles.balanceRow}>
-          <MaterialCommunityIcons name="calculator-variant" size={20} color={COLOR.info} />
-          <Text style={styles.balanceLabel}>Total:</Text>
-          <Text style={[styles.balanceValue, { fontWeight: 'bold' }]}>{formatCurrency(total)}</Text>
-        </View>
-      </Animated.View>
-    </Card>
-  );
-};
-
-const BalanceCard = ({ transactions }: { transactions: any[] }) => {
-  const ingresos = transactions
-    .filter(tx => tx.type === 'CLOSING' || tx.type === 'income')
-    .reduce((sum, tx) => sum + tx.amount, 0);
-  const egresos = transactions
-    .filter(tx => tx.type === 'SUPPLIER' || tx.type === 'SALARY' || tx.type === 'GASTO_ADMIN' || tx.type === 'expense' || tx.type === 'gasto_admin')
+    .filter(tx => EXPENSE_TYPES_ALL.includes(tx.type))
     .reduce((sum, tx) => sum + tx.amount, 0);
   const total = ingresos - egresos;
 
@@ -151,17 +103,17 @@ const BalanceCard = ({ transactions }: { transactions: any[] }) => {
         <View style={styles.balanceRow}>
           <MaterialCommunityIcons name="arrow-down-bold-circle-outline" size={20} color={COLOR.income} />
           <Text style={styles.balanceLabel}>Ingresos:</Text>
-          <Text style={styles.balanceValue}>{formatCurrency(ingresos)}</Text>
+          <Text style={styles.balanceValue}>{money(ingresos)}</Text>
         </View>
         <View style={styles.balanceRow}>
           <MaterialCommunityIcons name="arrow-up-bold-circle-outline" size={20} color={COLOR.expense} />
           <Text style={styles.balanceLabel}>Egresos:</Text>
-          <Text style={styles.balanceValue}>{formatCurrency(egresos)}</Text>
+          <Text style={styles.balanceValue}>{money(egresos)}</Text>
         </View>
         <View style={styles.balanceRow}>
           <MaterialCommunityIcons name="calculator-variant" size={20} color={COLOR.info} />
           <Text style={styles.balanceLabel}>Total:</Text>
-          <Text style={[styles.balanceValue, { fontWeight: 'bold' }]}>{formatCurrency(total)}</Text>
+          <Text style={[styles.balanceValue, { fontWeight: 'bold' }]}>{money(total)}</Text>
         </View>
       </Card.Content>
     </Card>
@@ -169,17 +121,32 @@ const BalanceCard = ({ transactions }: { transactions: any[] }) => {
 };
 
 // ─── KPI Row (4 cards: Balance · Ingresos · Egresos · Promedio) ───────────────
-const KpiRow = ({ transactions }: { transactions: Transaction[] }) => {
-  const INCOME_T = ['income', 'CLOSING'];
-  const EXPENSE_T = ['expense', 'SALARY', 'SUPPLIER', 'GASTO_ADMIN', 'gasto_admin'];
-  const incomeTxs  = transactions.filter(tx => INCOME_T.includes(tx.type));
-  const expenseTxs = transactions.filter(tx => EXPENSE_T.includes(tx.type));
+// O-09: el promedio diario dividía siempre por 30. Ahora usa los días del rango filtrado
+// (ambos extremos incluidos); sin rango, los días entre la primera y la última operación.
+const KpiRow = ({ transactions, startDate, endDate }: {
+  transactions: Transaction[];
+  startDate?: Date;
+  endDate?: Date;
+}) => {
+  const money = useMoney();
+  const incomeTxs  = transactions.filter(tx => INCOME_TYPES_ALL.includes(tx.type));
+  const expenseTxs = transactions.filter(tx => EXPENSE_TYPES_ALL.includes(tx.type));
   const totalIncome  = incomeTxs.reduce((s, tx) => s + tx.amount, 0);
   const totalExpense = expenseTxs.reduce((s, tx) => s + tx.amount, 0);
   const balance      = totalIncome - totalExpense;
-  const promedio     = balance / 30;
 
-  const money = useMoney();
+  const hasRange = !!(startDate && endDate);
+  let days = 1;
+  if (startDate && endDate) {
+    days = daysInRange(startDate, endDate);
+  } else {
+    const ts = transactions
+      .map(tx => (tx.date ? parseISO(tx.date.split('T')[0]).getTime() : NaN))
+      .filter(t => !isNaN(t));
+    if (ts.length > 0) days = daysInRange(new Date(Math.min(...ts)), new Date(Math.max(...ts)));
+  }
+  const promedio  = balance / days;
+  const daysLabel = `${days} ${days === 1 ? 'día' : 'días'}`;
   const L = (v: number) => money(Math.abs(v));
 
   return (
@@ -189,7 +156,7 @@ const KpiRow = ({ transactions }: { transactions: Transaction[] }) => {
         <Text style={[styles.kpiCardValue, { color: balance >= 0 ? COLOR.income : COLOR.expense }]}>
           {balance >= 0 ? '+' : '-'}{L(balance)}
         </Text>
-        <Text style={styles.kpiCardSub}>Periodo actual</Text>
+        <Text style={styles.kpiCardSub}>{hasRange ? daysLabel : 'Todo el historial'}</Text>
       </View>
       <View style={styles.kpiCard}>
         <Text style={styles.kpiCardLabel}>INGRESOS · {incomeTxs.length} MOV.</Text>
@@ -203,8 +170,8 @@ const KpiRow = ({ transactions }: { transactions: Transaction[] }) => {
       </View>
       <View style={styles.kpiCard}>
         <Text style={styles.kpiCardLabel}>PROMEDIO DIARIO</Text>
-        <Text style={styles.kpiCardValue}>{L(promedio)}</Text>
-        <Text style={styles.kpiCardSub}>Sobre el balance neto</Text>
+        <Text style={styles.kpiCardValue}>{promedio < 0 ? '-' : ''}{L(promedio)}</Text>
+        <Text style={styles.kpiCardSub}>Balance neto / {daysLabel}</Text>
       </View>
     </View>
   );
@@ -411,16 +378,28 @@ const AdminScreen = () => {
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
 
+  // G-01: `loading` de Paper no deshabilita el botón → se usa junto a `disabled`.
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  // O-07: error de carga visible (antes solo console.error → lista vacía y KPIs en 0).
+  // `loadError` bloquea la lista; `partialError` avisa que falta una parte (ej. 403 en
+  // /api/operations/all pero /transactions respondió).
+  const [loadError, setLoadError] = useState('');
+  const [partialError, setPartialError] = useState('');
+
+  const showSnackbar = (msg: string) => { setSnackbarMessage(msg); setSnackbarVisible(true); };
+
   const { width: screenWidth } = useWindowDimensions();
   const isLargeScreen = screenWidth >= 768;
 
   // Stores activos — cargados dinámicamente desde /api/v2/stores/active
   const [activeStores, setActiveStores] = useState<{id: number; name: string}[]>([]);
   useEffect(() => {
-    apiFetch(`${REACT_APP_API_URL}/api/v2/stores/active`)
-      .then(r => r.json())
-      .then(setActiveStores)
-      .catch(() => {});
+    axios.get<{ id: number; name: string }[]>(`${REACT_APP_API_URL}/api/v2/stores/active`, { timeout: API_TIMEOUT })
+      .then(r => setActiveStores(Array.isArray(r.data) ? r.data : []))
+      .catch(() => setActiveStores([])); // los nombres de local caen al storeName de cada fila
   }, []);
 
   // Manejador para éxito de importación desde Excel
@@ -467,17 +446,17 @@ const AdminScreen = () => {
         url += `?${queryParams.join('&')}`;
       }
 
-      const response = await apiFetch(url);
-      let adminExpensesData: Transaction[] = [];
-
-      if (response.ok) {
-        adminExpensesData = await response.json();
-      }
-
-      setTransactions(adminExpensesData);
+      setPartialError('');
+      const { data } = await axios.get<Transaction[]>(url, { timeout: API_TIMEOUT });
+      setTransactions(Array.isArray(data) ? data : []);
+      setLoadError('');
       setCurrentPage(1);
     } catch (err) {
       console.error('Error al cargar los gastos administrativos:', err);
+      setTransactions([]);
+      setLoadError(isForbidden(err)
+        ? NO_PERMISSION_MESSAGE
+        : apiErrorMessage(err, 'No se pudieron cargar los gastos administrativos.'));
     } finally {
       setLoading(false);
     }
@@ -506,11 +485,22 @@ const AdminScreen = () => {
         urlOperations += `?${queryParams.join('&')}`;
       }
 
-      const responseOps = await apiFetch(urlOperations);
+      let urlTransactions = `${REACT_APP_API_URL}/transactions`;
+      if (storeId) {
+        urlTransactions = `${REACT_APP_API_URL}/api/transactions/store/${storeId}`;
+      }
+
+      // Los dos pedidos son independientes: si uno falla (ej. 403 por falta del módulo
+      // OPERATIONS) se muestra el otro y se avisa qué parte falta.
+      const [opsResult, transResult] = await Promise.allSettled([
+        axios.get<Transaction[]>(urlOperations, { timeout: API_TIMEOUT }),
+        axios.get<Transaction[]>(urlTransactions, { timeout: API_TIMEOUT }),
+      ]);
+
       let operationsData: Transaction[] = [];
 
-      if (responseOps.ok) {
-        operationsData = await responseOps.json();
+      if (opsResult.status === 'fulfilled') {
+        operationsData = Array.isArray(opsResult.value.data) ? opsResult.value.data : [];
         operationsData = operationsData.map(op => {
           const newOp = { ...op };
 
@@ -525,18 +515,10 @@ const AdminScreen = () => {
         });
       }
 
-      let urlTransactions = `${REACT_APP_API_URL}/transactions`;
-      const transactionParams = [];
-
-      if (storeId) {
-        urlTransactions = `${REACT_APP_API_URL}/api/transactions/store/${storeId}`;
-      }
-
-      const responseTrans = await apiFetch(urlTransactions);
       let transactionsData: Transaction[] = [];
 
-      if (responseTrans.ok) {
-        transactionsData = await responseTrans.json();
+      if (transResult.status === 'fulfilled') {
+        transactionsData = Array.isArray(transResult.value.data) ? transResult.value.data : [];
 
         if (start && end) {
           const startDateStr = format(start, 'yyyy-MM-dd');
@@ -571,12 +553,54 @@ const AdminScreen = () => {
 
       setTransactions(sortedTransactions);
       setCurrentPage(1);
+
+      const opsErr = opsResult.status === 'rejected' ? opsResult.reason : null;
+      const transErr = transResult.status === 'rejected' ? transResult.reason : null;
+      if (opsErr && transErr) {
+        // Nada se pudo leer: no mostrar "No hay transacciones" ni KPIs en 0.
+        setLoadError(isForbidden(opsErr) && isForbidden(transErr)
+          ? NO_PERMISSION_MESSAGE
+          : apiErrorMessage(opsErr, 'No se pudieron cargar las operaciones.'));
+        setPartialError('');
+      } else if (opsErr || transErr) {
+        setLoadError('');
+        const missing = opsErr
+          ? 'depósitos de cierre, pagos a proveedores, salarios y gastos administrativos'
+          : 'ingresos y egresos sueltos';
+        const err = opsErr ?? transErr;
+        setPartialError(isForbidden(err)
+          ? `No tenés permiso para ver ${missing}. Los totales no los incluyen.`
+          : `No se pudieron cargar ${missing}. Los totales no los incluyen.`);
+      } else {
+        setLoadError('');
+        setPartialError('');
+      }
     } catch (err) {
       console.error('Error al cargar las transacciones:', err);
+      setTransactions([]);
+      setLoadError(apiErrorMessage(err, 'No se pudieron cargar las operaciones.'));
     } finally {
       setLoading(false);
     }
   };
+
+  const reload = () => {
+    if (showAdminExpenses) {
+      fetchAdminExpenses(startDate, endDate, selectedStore);
+    } else {
+      fetchData(startDate, endDate, selectedStore);
+    }
+  };
+
+  // O-04: el filtro por fecha solo se aplica con Desde y Hasta. Con una sola, se avisa
+  // en vez de ignorarla en silencio; con el rango invertido, también.
+  const rangeHint = startDate && !endDate
+    ? 'Elegí también la fecha "Hasta" para filtrar por período.'
+    : !startDate && endDate
+      ? 'Elegí también la fecha "Desde" para filtrar por período.'
+      : startDate && endDate && startDate.getTime() > endDate.getTime()
+        ? 'La fecha "Desde" es posterior a "Hasta": no hay operaciones en ese rango.'
+        : '';
 
   useFocusEffect(
     useCallback(() => {
@@ -670,32 +694,28 @@ const AdminScreen = () => {
   };
 
   const confirmDelete = async () => {
-    if (!transactionToDelete) return;
+    const target = transactionToDelete;
+    if (!target || deleting) return;
+    // G-02: cerrar el diálogo ANTES de ejecutar (un doble toque ya no dispara dos DELETE).
+    setShowDeleteConfirmation(false);
+    setTransactionToDelete(null);
+    setDeleting(true);
     try {
       let url = '';
-      if (transactionToDelete.type === 'income' || transactionToDelete.type === 'expense' || transactionToDelete.type === 'gasto_admin') {
-        url = `${REACT_APP_API_URL}/transactions/${transactionToDelete.id}`;
+      if (target.type === 'income' || target.type === 'expense' || target.type === 'gasto_admin') {
+        url = `${REACT_APP_API_URL}/transactions/${target.id}`;
       } else {
-        url = `${REACT_APP_API_URL}/api/operations/${transactionToDelete.type}/${transactionToDelete.id}`;
+        url = `${REACT_APP_API_URL}/api/operations/${target.type}/${target.id}`;
       }
-      const response = await apiFetch(url, { method: 'DELETE' });
-      if (response.ok) {
-        setSnackbarMessage('La transacción ha sido eliminada correctamente.');
-        setSnackbarVisible(true);
-        if (showAdminExpenses) {
-          fetchAdminExpenses(startDate, endDate, selectedStore);
-        } else {
-          fetchData(startDate, endDate, selectedStore);
-        }
-      } else {
-        Alert.alert('Error', 'No se pudo eliminar la transacción.');
-      }
+      await axios.delete(url, { timeout: API_TIMEOUT });
+      showSnackbar('La operación se eliminó correctamente.');
+      reload();
     } catch (error) {
       console.error('Error al eliminar la transacción:', error);
-      Alert.alert('Error', 'Ocurrió un error al eliminar la transacción.');
+      // O-08: Alert.alert no se ve en la web → Snackbar.
+      showSnackbar(apiErrorMessage(error, 'No se pudo eliminar la operación.'));
     } finally {
-      setShowDeleteConfirmation(false);
-      setTransactionToDelete(null);
+      setDeleting(false);
     }
   };
   // -----------------------------------------------------------------------
@@ -722,28 +742,39 @@ const AdminScreen = () => {
     setNewPeriodStart(transaction.periodStart ?? '');
     setNewPeriodEnd(transaction.periodEnd ?? '');
     setNewSupplier(transaction.supplier ?? '');
-    setNewStoreId(null);
+    // O-02: precargar el local de la operación (antes null → había que re-elegirlo, y en
+    // Gasto Administrativo, que no tiene selector, guardar era imposible).
+    setNewStoreId(transaction.store?.id ?? transaction.storeId ?? null);
+    setEditError('');
     setEditModalVisible(true);
   };
 
   const handleSaveEdit = async () => {
-    if (!editingTransaction) return;
+    if (!editingTransaction || savingEdit) return;
     const parsedAmount = parseFloat(newAmount.replace(/,/g, ''));
-    if (isNaN(parsedAmount)) {
-      Alert.alert('Error', 'Por favor ingrese un monto válido.');
+    // O-20: el monto tiene que ser mayor a 0.
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      setEditError('Ingresá un monto mayor a 0.');
       return;
     }
-    if (newStoreId === null) {
-      Alert.alert('Error', 'Por favor seleccione un local.');
+    // O-02: Gasto Administrativo se reparte entre locales y no tiene selector de local.
+    if (newStoreId === null && editingTransaction.type !== 'GASTO_ADMIN') {
+      setEditError('Seleccioná un local.');
       return;
     }
+
+    // O-03: antes se mandaba username "default_user" y el autor original se perdía.
+    // Se reenvía el autor que vino en la fila: el backend (FormsService.updateClosingDeposit)
+    // copia `username` sin chequear null en los Cierres, así que omitirlo lo borraría.
+    // Lo correcto (pendiente de backend) es que el autor no se pueda cambiar al editar.
+    const originalAuthor = editingTransaction.username || undefined;
 
     let updatedTransaction = {};
 
     if (editingTransaction.type === 'CLOSING') {
       updatedTransaction = {
         amount: parsedAmount,
-        username: "default_user",
+        username: originalAuthor,
         closingsCount: newClosingsCount ? parseInt(newClosingsCount) : undefined,
         periodStart: newPeriodStart || undefined,
         periodEnd: newPeriodEnd || undefined,
@@ -753,7 +784,7 @@ const AdminScreen = () => {
     } else if (editingTransaction.type === 'SUPPLIER') {
       updatedTransaction = {
         amount: parsedAmount,
-        username: "default_user",
+        username: originalAuthor,
         supplier: newSupplier || undefined,
         paymentDate: newDate || undefined,
         storeId: newStoreId,
@@ -763,7 +794,7 @@ const AdminScreen = () => {
       updatedTransaction = {
         amount: parsedAmount,
         description: newDescription || undefined,
-        username: "default_user",
+        username: originalAuthor,
         salaryDate: newDate || undefined,
         storeId: newStoreId
       };
@@ -777,9 +808,10 @@ const AdminScreen = () => {
       };
     }
 
+    setEditError('');
+    setSavingEdit(true);
     try {
-      console.log("Enviando datos:", JSON.stringify(updatedTransaction, null, 2));
-
+      // O-14: sin console.log del payload.
       let url = '';
       if (editingTransaction.type === 'income' || editingTransaction.type === 'expense' || editingTransaction.type === 'gasto_admin') {
         url = `${REACT_APP_API_URL}/transactions/${editingTransaction.id}`;
@@ -787,42 +819,24 @@ const AdminScreen = () => {
         url = `${REACT_APP_API_URL}/api/operations/${editingTransaction.type}/${editingTransaction.id}`;
       }
 
-      const response = await apiFetch(url, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(updatedTransaction),
-      });
+      await axios.put(url, updatedTransaction, { timeout: API_TIMEOUT });
 
-      if (response.ok) {
-        setSnackbarMessage('La transacción ha sido actualizada correctamente.');
-        setSnackbarVisible(true);
-        setEditModalVisible(false);
-        setEditingTransaction(null);
-        if (showAdminExpenses) {
-          fetchAdminExpenses(startDate, endDate, selectedStore);
-        } else {
-          fetchData(startDate, endDate, selectedStore);
-        }
-      } else {
-        const errorText = await response.text();
-        console.error("Error response:", errorText);
-        try {
-          const errorData = JSON.parse(errorText);
-          const errorMessage = errorData.message || 'No se pudo actualizar la transacción.';
-          Alert.alert('Error', errorMessage);
-        } catch {
-          Alert.alert('Error', `Error del servidor: ${response.status}`);
-        }
-      }
+      showSnackbar('La operación se actualizó correctamente.');
+      setEditModalVisible(false);
+      setEditingTransaction(null);
+      reload();
     } catch (error) {
       console.error('Error al actualizar la transacción:', error);
-      Alert.alert('Error', 'Ocurrió un error al actualizar la transacción.');
+      // O-08: en la web Alert.alert no muestra nada. El modal queda abierto (no se pierde
+      // lo editado) y el error se muestra dentro de él: un Snackbar quedaría tapado.
+      setEditError(apiErrorMessage(error, 'No se pudo actualizar la operación.'));
+    } finally {
+      setSavingEdit(false);
     }
   };
 
   const handleCancelEdit = () => {
+    if (savingEdit) return;
     setEditModalVisible(false);
     setEditingTransaction(null);
   };
@@ -1191,22 +1205,16 @@ const buildImageUrl = (imagePath: string | undefined): string | null => {
     const txColor = isIncome ? COLOR.income : COLOR.expense;
     const txBg    = isIncome ? COLOR.incomeTint : COLOR.expenseTint;
 
+    // O-11: el Salario usaba depositDate (siempre vacío) en vez de salaryDate.
     const dateToShow = item.type === 'CLOSING' && item.depositDate ? item.depositDate
       : item.type === 'SUPPLIER' && item.paymentDate ? item.paymentDate
-      : item.type === 'SALARY'   && item.depositDate ? item.depositDate
+      : item.type === 'SALARY'   && item.salaryDate ? item.salaryDate
       : item.date;
 
-    const fmtDate = (d?: string) => {
-      if (!d) return '—';
-      try {
-        const dt = parseISO(d);
-        return format(dt, 'dd MMM yyyy');
-      } catch { return String(d).split('T')[0]; }
-    };
-    const fmtTime = (d?: string) => {
-      if (!d) return '';
-      try { return format(parseISO(d), 'HH:mm'); } catch { return ''; }
-    };
+    // Fechas con utils (locale de la app, sin corrimiento UTC en fechas "solo día").
+    const fmtDate = (d?: string) => formatDateOnly(d);
+    // O-12: las operaciones guardan solo el día → sin "T" no se inventa "00:00".
+    const fmtTime = (d?: string) => (d && hasTime(d) ? formatTime(d) : '');
 
     const storeIdResolved = item.store?.id ?? item.storeId;
     const storeName =
@@ -1235,10 +1243,14 @@ const buildImageUrl = (imagePath: string | undefined): string | null => {
         {/* Nombre + badge + metadata */}
         <View style={styles.txMain}>
           <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-            <Text style={styles.txName}>{TRANSACTION_LABELS[item.type]}</Text>
-            <View style={[styles.txBadge, { backgroundColor: txBg }]}>
-              <Text style={[styles.txBadgeText, { color: txColor }]}>{TRANSACTION_LABELS[item.type]}</Text>
-            </View>
+            <Text style={styles.txName}>{TRANSACTION_LABELS[item.type] ?? item.type}</Text>
+            {/* O-10: el badge repetía el tipo ("Cierre [Cierre]"). En celular, donde no
+                hay columna Local, muestra el local. */}
+            {!isLargeScreen && storeName !== '—' && (
+              <View style={[styles.txBadge, { backgroundColor: txBg }]}>
+                <Text style={[styles.txBadgeText, { color: txColor }]} numberOfLines={1}>{storeName}</Text>
+              </View>
+            )}
           </View>
           {metaParts.length > 0 && (
             <Text style={styles.txMeta} numberOfLines={1}>{metaParts.join(' · ')}</Text>
@@ -1253,7 +1265,7 @@ const buildImageUrl = (imagePath: string | undefined): string | null => {
         {/* Fecha */}
         <View style={styles.txDateWrap}>
           <Text style={styles.txDate}>{fmtDate(dateToShow)}</Text>
-          <Text style={styles.txTime}>{fmtTime(dateToShow)}</Text>
+          {fmtTime(dateToShow) ? <Text style={styles.txTime}>{fmtTime(dateToShow)}</Text> : null}
         </View>
 
         {/* Monto */}
@@ -1275,8 +1287,8 @@ const buildImageUrl = (imagePath: string | undefined): string | null => {
               accessibilityLabel="Ver comprobante"
             />
           )}
-          <IconButton icon="pencil" size={18} onPress={() => handleEdit(item)} iconColor={COLOR.info} />
-          <IconButton icon="delete" size={18} onPress={() => handleDelete(item)} iconColor={COLOR.expense} />
+          <IconButton icon="pencil" size={18} onPress={() => handleEdit(item)} iconColor={COLOR.info} accessibilityLabel="Editar" />
+          <IconButton icon="delete" size={18} onPress={() => handleDelete(item)} iconColor={COLOR.expense} disabled={deleting} accessibilityLabel="Eliminar" />
         </View>
       </View>
     );
@@ -1353,8 +1365,10 @@ const buildImageUrl = (imagePath: string | undefined): string | null => {
               textColor={COLOR.ink2}
               style={{ borderColor: COLOR.border, minWidth: 0 }}
               labelStyle={{ fontSize: 12 }}
+              icon={filtersExpanded ? 'chevron-up' : 'chevron-down'}
+              contentStyle={{ flexDirection: 'row-reverse' }}
             >
-              {filtersExpanded ? 'Cerrar ▲' : 'Filtros ▼'}
+              {filtersExpanded ? 'Cerrar' : 'Filtros'}
             </Button>
           </View>
 
@@ -1445,8 +1459,10 @@ const buildImageUrl = (imagePath: string | undefined): string | null => {
               textColor={COLOR.ink2}
               style={{ borderColor: COLOR.border }}
               labelStyle={{ fontSize: 13 }}
+              icon={filtersExpanded ? 'chevron-up' : 'chevron-down'}
+              contentStyle={{ flexDirection: 'row-reverse' }}
             >
-              {filtersExpanded ? 'Cerrar ▲' : 'Filtros ▼'}
+              {filtersExpanded ? 'Cerrar' : 'Filtros'}
             </Button>
           </View>
 
@@ -1474,11 +1490,37 @@ const buildImageUrl = (imagePath: string | undefined): string | null => {
         </View>
       )}
 
-      {/* ── KPI stats row ── */}
-      {!loading && <KpiRow transactions={transactions} />}
+      {/* O-04: aviso de rango incompleto o invertido */}
+      {!!rangeHint && (
+        <View style={[styles.banner, styles.bannerWarn]}>
+          <MaterialCommunityIcons name="calendar-alert" size={18} color={COLOR.warn} />
+          <Text style={styles.bannerText}>{rangeHint}</Text>
+        </View>
+      )}
+
+      {/* O-07: error de carga visible, con Reintentar (403 → "No tenés permiso") */}
+      {!loading && !!loadError && (
+        <View style={[styles.banner, styles.bannerError]}>
+          <MaterialCommunityIcons name="alert-circle-outline" size={18} color={COLOR.expense} />
+          <Text style={styles.bannerText}>{loadError}</Text>
+          <Button compact mode="text" textColor={COLOR.expense} onPress={reload}>Reintentar</Button>
+        </View>
+      )}
+      {!loading && !loadError && !!partialError && (
+        <View style={[styles.banner, styles.bannerWarn]}>
+          <MaterialCommunityIcons name="lock-outline" size={18} color={COLOR.warn} />
+          <Text style={styles.bannerText}>{partialError}</Text>
+          <Button compact mode="text" textColor={COLOR.warn} onPress={reload}>Reintentar</Button>
+        </View>
+      )}
+
+      {/* ── KPI stats row ── (sin datos leídos no se muestran KPIs en 0) */}
+      {!loading && !loadError && (
+        <KpiRow transactions={transactions} startDate={startDate} endDate={endDate} />
+      )}
 
       {/* ── Tabla header (solo desktop) ── */}
-      {!loading && isLargeScreen && (
+      {!loading && !loadError && isLargeScreen && (
         <View style={styles.txTableHeader}>
           <View style={{ width: 40 }} />
           <Text style={[styles.txTableHeaderText, { flex: 2 }]}>OPERACIÓN</Text>
@@ -1496,10 +1538,10 @@ const buildImageUrl = (imagePath: string | undefined): string | null => {
             Cargando datos desde la base de datos...
           </ThemedText>
         </View>
-      ) : (
+      ) : loadError ? null : (
         <ScrollView style={styles.scrollView}>
           {paginatedTransactions.length === 0 ? (
-            <ThemedText style={styles.noDataText}>No hay transacciones para mostrar</ThemedText>
+            <ThemedText style={styles.noDataText}>No hay operaciones para mostrar</ThemedText>
           ) : (
             <>
               {paginatedTransactions.map((item, index) => renderTransaction(item, index))}
@@ -1508,7 +1550,9 @@ const buildImageUrl = (imagePath: string | undefined): string | null => {
         </ScrollView>
       )}
 
-      <View style={styles.fixedPaginationContainer}>{renderPagination()}</View>
+      {!loading && !loadError && totalPages > 1 && (
+        <View style={styles.fixedPaginationContainer}>{renderPagination()}</View>
+      )}
 
       <DatePickerModal
         locale="es"
@@ -1540,11 +1584,24 @@ const buildImageUrl = (imagePath: string | undefined): string | null => {
               style={styles.modalInput}
             />
             {renderEditFields()}
+            {!!editError && (
+              <View style={[styles.banner, styles.bannerError, { marginHorizontal: 0 }]}>
+                <MaterialCommunityIcons name="alert-circle-outline" size={18} color={COLOR.expense} />
+                <Text style={styles.bannerText}>{editError}</Text>
+              </View>
+            )}
             <View style={styles.modalButtonContainer}>
-              <Button onPress={handleCancelEdit} mode="outlined" style={styles.modalButton}>
+              <Button onPress={handleCancelEdit} mode="outlined" style={styles.modalButton} disabled={savingEdit}>
                 Cancelar
               </Button>
-              <Button onPress={handleSaveEdit} mode="contained" style={styles.modalButton}>
+              {/* G-01: loading + disabled → un doble toque no manda dos PUT */}
+              <Button
+                onPress={handleSaveEdit}
+                mode="contained"
+                style={styles.modalButton}
+                loading={savingEdit}
+                disabled={savingEdit}
+              >
                 Guardar
               </Button>
             </View>
@@ -1569,7 +1626,15 @@ const buildImageUrl = (imagePath: string | undefined): string | null => {
               <Button onPress={() => setShowDeleteConfirmation(false)} mode="outlined" style={styles.modalButton}>
                 Cancelar
               </Button>
-              <Button onPress={confirmDelete} mode="contained" style={styles.modalButton}>
+              {/* G-01/G-02: confirmDelete cierra el diálogo antes de ejecutar */}
+              <Button
+                onPress={confirmDelete}
+                mode="contained"
+                style={styles.modalButton}
+                buttonColor={COLOR.expense}
+                loading={deleting}
+                disabled={deleting}
+              >
                 Eliminar
               </Button>
             </View>
@@ -2099,6 +2164,15 @@ const styles = StyleSheet.create({
   txAmtWrap:   { alignItems: 'flex-end', minWidth: 90 },
   txAmt:       { fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any, letterSpacing: -0.3 },
   txAmtLabel:  { fontSize: FONT_SIZE.caption, color: COLOR.inkMute, fontWeight: FONT_WEIGHT.semibold as any },
+  // O-04 / O-07: avisos arriba de la lista
+  banner:      {
+    flexDirection: 'row', alignItems: 'center', gap: SPACE.s2,
+    marginHorizontal: SPACE.s3, marginTop: SPACE.s2, paddingHorizontal: SPACE.s3, paddingVertical: SPACE.s2,
+    borderRadius: RADIUS.r2, borderWidth: 1,
+  },
+  bannerError: { backgroundColor: COLOR.expenseTint, borderColor: COLOR.expenseBorder },
+  bannerWarn:  { backgroundColor: COLOR.warnTint, borderColor: COLOR.warnBorder },
+  bannerText:  { flex: 1, fontSize: FONT_SIZE.label, color: COLOR.ink },
 });
 
 const storeChipStyle = StyleSheet.create({
