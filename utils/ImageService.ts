@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { REACT_APP_API_URL } from '../config';
+import { apiFetch } from './apiFetch';
 
 export interface ImageUploadResult {
   success: boolean;
@@ -40,7 +41,7 @@ export class ImageService {
       const formData = new FormData();
 
       if (Platform.OS === 'web') {
-        const response = await fetch(imageUri);
+        const response = await apiFetch(imageUri);
         const blob = await response.blob();
         const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
         formData.append('file', file);
@@ -53,7 +54,7 @@ export class ImageService {
       }
 
       // Upload vía backend → backend sube a Cloudflare R2
-      const uploadResponse = await fetch(`${REACT_APP_API_URL}/api/v2/uploads/comprobante`, {
+      const uploadResponse = await apiFetch(`${REACT_APP_API_URL}/api/v2/uploads/comprobante`, {
         method: 'POST',
         body: formData,
       });

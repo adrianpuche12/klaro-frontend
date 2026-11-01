@@ -262,7 +262,7 @@ export default function SalesHistoryScreen({ mine = false, store }: Props) {
     if (shifts.length === 0 && !hasMore) {
       return (
         <View style={styles.empty}>
-          <MaterialCommunityIcons name="receipt-text-outline" size={40} color={COLOR.inkDisabled} />
+          <MaterialCommunityIcons name="receipt" size={40} color={COLOR.inkDisabled} />
           <Text style={styles.emptyText}>
             {mine ? 'Todavía no tenés turnos registrados en este local.' : 'No hay turnos registrados para este local.'}
           </Text>

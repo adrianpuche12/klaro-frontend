@@ -18,6 +18,7 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import { exportToExcel, createImportTemplate, importFromExcel, TRANSACTION_LABELS } from '../utils/ExcelUtils';
 import { COLOR, FONT_SIZE, FONT_WEIGHT, RADIUS } from '../theme';
 import { REACT_APP_API_URL } from '../config';
+import { apiFetch } from '../utils/apiFetch';
 
 interface ExcelManagerProps {
   visible: boolean;
@@ -34,7 +35,7 @@ const ExcelManager: React.FC<ExcelManagerProps> = ({
 }) => {
   const [activeStores, setActiveStores] = useState<{id: number; name: string}[]>([]);
   useEffect(() => {
-    fetch(`${REACT_APP_API_URL}/api/v2/stores/active`)
+    apiFetch(`${REACT_APP_API_URL}/api/v2/stores/active`)
       .then(r => r.json())
       .then(setActiveStores)
       .catch(() => {});

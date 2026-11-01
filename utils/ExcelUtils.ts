@@ -4,6 +4,7 @@ import { Platform, Alert } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import { format } from 'date-fns';
+import { apiFetch } from './apiFetch';
 
 interface Transaction {
   id?: number;
@@ -481,7 +482,7 @@ const processSpecialTransactions = async (
         continue;
       }
 
-      const response = await fetch(endpoint, {
+      const response = await apiFetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

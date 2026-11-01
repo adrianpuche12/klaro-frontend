@@ -30,6 +30,7 @@ import ImageViewer from '../components/ImageViewer';
 import ImageButton from '../components/ImageButton';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../theme';
 import { useMoney, useTenantConfig } from '../context/TenantConfigContext';
+import { apiFetch } from '../utils/apiFetch';
 
 const TRANSACTION_LABELS: Record<Transaction['type'], string> = {
   income: 'Ingreso',
@@ -416,7 +417,7 @@ const AdminScreen = () => {
   // Stores activos — cargados dinámicamente desde /api/v2/stores/active
   const [activeStores, setActiveStores] = useState<{id: number; name: string}[]>([]);
   useEffect(() => {
-    fetch(`${REACT_APP_API_URL}/api/v2/stores/active`)
+    apiFetch(`${REACT_APP_API_URL}/api/v2/stores/active`)
       .then(r => r.json())
       .then(setActiveStores)
       .catch(() => {});
@@ -466,7 +467,7 @@ const AdminScreen = () => {
         url += `?${queryParams.join('&')}`;
       }
 
-      const response = await fetch(url);
+      const response = await apiFetch(url);
       let adminExpensesData: Transaction[] = [];
 
       if (response.ok) {
@@ -505,7 +506,7 @@ const AdminScreen = () => {
         urlOperations += `?${queryParams.join('&')}`;
       }
 
-      const responseOps = await fetch(urlOperations);
+      const responseOps = await apiFetch(urlOperations);
       let operationsData: Transaction[] = [];
 
       if (responseOps.ok) {
@@ -531,7 +532,7 @@ const AdminScreen = () => {
         urlTransactions = `${REACT_APP_API_URL}/api/transactions/store/${storeId}`;
       }
 
-      const responseTrans = await fetch(urlTransactions);
+      const responseTrans = await apiFetch(urlTransactions);
       let transactionsData: Transaction[] = [];
 
       if (responseTrans.ok) {
@@ -677,7 +678,7 @@ const AdminScreen = () => {
       } else {
         url = `${REACT_APP_API_URL}/api/operations/${transactionToDelete.type}/${transactionToDelete.id}`;
       }
-      const response = await fetch(url, { method: 'DELETE' });
+      const response = await apiFetch(url, { method: 'DELETE' });
       if (response.ok) {
         setSnackbarMessage('La transacción ha sido eliminada correctamente.');
         setSnackbarVisible(true);
@@ -786,7 +787,7 @@ const AdminScreen = () => {
         url = `${REACT_APP_API_URL}/api/operations/${editingTransaction.type}/${editingTransaction.id}`;
       }
 
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

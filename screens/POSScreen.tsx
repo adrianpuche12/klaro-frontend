@@ -659,7 +659,7 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
             <ScrollView contentContainerStyle={{ padding: 12, gap: 10 }}>
               {shiftSales.length === 0 ? (
                 <View style={styles.salesEmpty}>
-                  <MaterialCommunityIcons name="receipt-text-outline" size={40} color={COLOR.inkDisabled} />
+                  <MaterialCommunityIcons name="receipt" size={40} color={COLOR.inkDisabled} />
                   <Text style={styles.salesEmptyText}>Todavía no hay ventas en este turno.</Text>
                   <Text style={styles.salesEmptySub}>Registrá una venta y aparecerá aquí.</Text>
                 </View>
