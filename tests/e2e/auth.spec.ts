@@ -12,7 +12,14 @@ async function login(page: any, username: string, password: string) {
   await page.keyboard.type(username);
   await page.locator('input').nth(1).click({ force: true });
   await page.keyboard.type(password);
-  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('button', { name: 'Ingresar' }).click();
+}
+
+// Cerrar sesión pide confirmación (Revisión 01, N-03): botón del menú y después el del diálogo.
+async function logout(page: any) {
+  await page.getByRole('button', { name: 'Cerrar sesión' }).first().click();
+  await expect(page.getByText('¿Cerrar sesión?')).toBeVisible();
+  await page.getByRole('button', { name: 'Cerrar sesión' }).last().click();
 }
 
 // ─── Admin (root / admin) ─────────────────────────────────────────────────────
@@ -29,9 +36,9 @@ test.describe('Admin login', () => {
   test('admin puede cerrar sesión y vuelve al login', async ({ page }) => {
     await login(page, ADMIN_USER, ADMIN_PASS);
     await expect(page.getByText('Dashboard').first()).toBeVisible();
-    await page.getByText('Cerrar sesión').click();
+    await logout(page);
     await expect(page).toHaveURL(/\/login/);
-    await expect(page.getByRole('button', { name: 'Iniciar sesión' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Ingresar' })).toBeVisible();
   });
 
   test('credenciales incorrectas muestran error', async ({ page }) => {
@@ -55,8 +62,8 @@ test.describe('User login', () => {
   test('user puede cerrar sesión y vuelve al login', async ({ page }) => {
     await login(page, USER_USER, USER_PASS);
     await expect(page.getByText('Ventas').first()).toBeVisible();
-    await page.getByText('Cerrar sesión').click();
+    await logout(page);
     await expect(page).toHaveURL(/\/login/);
-    await expect(page.getByRole('button', { name: 'Iniciar sesión' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Ingresar' })).toBeVisible();
   });
 });
