@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
 import { useAuth } from './AuthContext';
@@ -14,6 +15,7 @@ interface StoreContextType {
   selectedStore: Store | null;
   setSelectedStore: (store: Store) => void;
   loadingStores: boolean;
+  storesError: string | null;
   refreshStores: () => Promise<void>;
 }
 
@@ -22,40 +24,57 @@ const StoreContext = createContext<StoreContextType>({
   selectedStore: null,
   setSelectedStore: () => {},
   loadingStores: true,
+  storesError: null,
   refreshStores: async () => {},
 });
 
-export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated } = useAuth();
-  const [stores, setStores]               = useState<Store[]>([]);
-  const [selectedStore, setSelectedStore] = useState<Store | null>(null);
-  const [loadingStores, setLoadingStores] = useState(true);
+const keyFor = (userId: string) => `@belopia/selected-store/${userId}`;
 
-  const refreshStores = async () => {
+export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAuthenticated, userId } = useAuth();
+  const [stores, setStores] = useState<Store[]>([]);
+  const [selectedStore, setSelected] = useState<Store | null>(null);
+  const [loadingStores, setLoadingStores] = useState(true);
+  const [storesError, setStoresError] = useState<string | null>(null);
+
+  // K-04: recordar el local elegido por usuario. Antes, al recargar, volvía al primero
+  // de la lista y un cajero de "Norte" podía registrar ventas en "Centro" sin darse cuenta.
+  const setSelectedStore = useCallback((store: Store) => {
+    setSelected(store);
+    if (userId) AsyncStorage.setItem(keyFor(userId), String(store.id)).catch(() => {});
+  }, [userId]);
+
+  const refreshStores = useCallback(async () => {
     try {
-      const r = await axios.get<Store[]>(`${REACT_APP_API_URL}/api/v2/stores`);
-      const active = r.data.filter(s => s.active);
+      setStoresError(null);
+      const r = await axios.get<Store[]>(`${REACT_APP_API_URL}/api/v2/stores`, { timeout: 15000 });
+      const active = r.data.filter((s) => s.active);
       setStores(active);
-      // Si el local seleccionado fue desactivado, seleccionar el primero disponible
-      setSelectedStore(prev =>
-        prev && active.find(s => s.id === prev.id) ? prev : active[0] ?? null
+      const savedId = userId ? await AsyncStorage.getItem(keyFor(userId)).catch(() => null) : null;
+      setSelected((prev) =>
+        (prev && active.find((s) => s.id === prev.id))
+        || active.find((s) => String(s.id) === savedId)
+        || active[0]
+        || null
       );
-    } catch {}
-  };
+    } catch {
+      setStoresError('No se pudieron cargar los locales'); // antes: catch {} silencioso
+    }
+  }, [userId]);
 
   useEffect(() => {
     if (!isAuthenticated) {
       setStores([]);
-      setSelectedStore(null);
+      setSelected(null);
       setLoadingStores(false);
       return;
     }
     setLoadingStores(true);
     refreshStores().finally(() => setLoadingStores(false));
-  }, [isAuthenticated]);
+  }, [isAuthenticated, refreshStores]);
 
   return (
-    <StoreContext.Provider value={{ stores, selectedStore, setSelectedStore, loadingStores, refreshStores }}>
+    <StoreContext.Provider value={{ stores, selectedStore, setSelectedStore, loadingStores, storesError, refreshStores }}>
       {children}
     </StoreContext.Provider>
   );

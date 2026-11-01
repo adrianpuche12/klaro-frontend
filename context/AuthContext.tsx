@@ -4,7 +4,26 @@ import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 import { API_KEYCLOAK_ADAPTER_URL, REACT_APP_API_URL } from '../config';
 import { Platform } from 'react-native';
-import { SplashScreen } from '../components/SplashScreen';
+
+const CLIENT_ID = 'klaro-frontend';
+const SESSION_KEYS = [
+  'accessToken', 'refreshToken', 'expiresIn', 'userName', 'userId', 'roles', 'canManageUsers', 'permissions',
+];
+
+/** L-01: el login informa POR QUÉ falló (antes devolvía false y todo era "contraseña incorrecta"). */
+export type AuthErrorCode = 'credentials' | 'network' | 'server' | 'unknown';
+export class AuthError extends Error {
+  constructor(public code: AuthErrorCode) { super(code); }
+}
+
+// K-08: cliente propio para Keycloak, con timeout y fuera del interceptor global de la API.
+const kc = axios.create({
+  baseURL: API_KEYCLOAK_ADAPTER_URL,
+  timeout: 15000,
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+});
+
+const isNetworkError = (e: any) => !e?.response;
 
 
 interface AuthState {
@@ -35,7 +54,7 @@ interface ProfileAccess { canManageUsers: boolean; permissions: string[] | null 
  * accessibleStores), es la excepción legacy de acceso total. */
 async function fetchProfileAccess(username: string): Promise<ProfileAccess> {
   try {
-    const res = await axios.get(`${REACT_APP_API_URL}/api/v2/users/by-username/${username}`);
+    const res = await axios.get(`${REACT_APP_API_URL}/api/v2/users/by-username/${username}`, { timeout: 15000 });
     const d = res.data;
     const isLegacy = !d.roleId
       && !d.businessRole
@@ -50,7 +69,8 @@ async function fetchProfileAccess(username: string): Promise<ProfileAccess> {
 
 
 interface AuthContextType extends AuthState {
-  login: (username: string, password: string) => Promise<boolean>;
+  /** Lanza AuthError si falla (L-01). */
+  login: (username: string, password: string) => Promise<true>;
   logout: () => Promise<void>;
   isAuthenticated: boolean;
 }
@@ -73,93 +93,64 @@ export function resolveAppRoles(decodedToken: any): string[] {
   return ['staff'];
 }
 
+/**
+ * K-07: un solo backend por plataforma.
+ * Web → sessionStorage (la sesión dura lo que la pestaña, comportamiento actual).
+ * Nativo → AsyncStorage.
+ * Antes setItem/removeItem escribían en los dos (en web AsyncStorage = localStorage)
+ * y multiSet/multiRemove en uno solo: quedaban tokens viejos en localStorage.
+ */
 const Storage = {
-  async setItem(key: string, value: string): Promise<void> {
+  async multiSet(pairs: [string, string][]): Promise<void> {
     try {
-      if (Platform.OS === 'web') {
-        sessionStorage.setItem(key, value);
-      }
-      await AsyncStorage.setItem(key, value);
+      if (Platform.OS === 'web') pairs.forEach(([k, v]) => sessionStorage.setItem(k, v));
+      else await AsyncStorage.multiSet(pairs);
     } catch (error) {
-      console.error('Error guardando datos:', error);
+      console.error('Error guardando la sesión:', error);
     }
   },
 
-  async getItem(key: string): Promise<string | null> {
+  async multiGet(keys: string[]): Promise<Record<string, string | null>> {
     try {
-      if (Platform.OS === 'web') {
-        return sessionStorage.getItem(key);
-      }
-      return await AsyncStorage.getItem(key);
+      if (Platform.OS === 'web') return Object.fromEntries(keys.map(k => [k, sessionStorage.getItem(k)]));
+      return Object.fromEntries(await AsyncStorage.multiGet(keys));
     } catch (error) {
-      console.error('Error obteniendo datos:', error);
-      return null;
+      console.error('Error leyendo la sesión:', error);
+      return Object.fromEntries(keys.map(k => [k, null]));
     }
   },
 
-  async removeItem(key: string): Promise<void> {
+  async clear(): Promise<void> {
     try {
       if (Platform.OS === 'web') {
-        sessionStorage.removeItem(key);
+        // También borra los restos que la versión anterior dejaba en localStorage.
+        SESSION_KEYS.forEach(k => { sessionStorage.removeItem(k); localStorage.removeItem(k); });
+      } else {
+        await AsyncStorage.multiRemove(SESSION_KEYS);
       }
-      await AsyncStorage.removeItem(key);
     } catch (error) {
-      console.error('Error eliminando datos:', error);
+      console.error('Error limpiando la sesión:', error);
     }
   },
+};
 
-  async multiSet(keyValuePairs: [string, string][]): Promise<void> {
-    try {
-      if (Platform.OS === 'web') {
-        keyValuePairs.forEach(([key, value]) => {
-          sessionStorage.setItem(key, value);
-        });
-        return;
-      }
-      await AsyncStorage.multiSet(keyValuePairs);
-    } catch (error) {
-      console.error('Error guardando múltiples datos:', error);
-    }
-  },
-
-  async multiGet(keys: string[]): Promise<readonly [string, string | null][]> {
-    try {
-      if (Platform.OS === 'web') {
-        return keys.map(key => [key, sessionStorage.getItem(key)] as [string, string | null]);
-      }
-      return await AsyncStorage.multiGet(keys);
-    } catch (error) {
-      console.error('Error obteniendo múltiples datos:', error);
-      return keys.map(key => [key, null] as [string, string | null]);
-    }
-  },
-
-  async multiRemove(keys: string[]): Promise<void> {
-    try {
-      if (Platform.OS === 'web') {
-        keys.forEach(key => sessionStorage.removeItem(key));
-        return;
-      }
-      await AsyncStorage.multiRemove(keys);
-    } catch (error) {
-      console.error('Error eliminando múltiples datos:', error);
-    }
-  }
+const EMPTY_STATE: AuthState = {
+  accessToken: null,
+  refreshToken: null,
+  expiresIn: null,
+  roles: [],
+  canManageUsers: false,
+  permissions: null,
+  userName: null,
+  userId: null,
+  loading: false,
+  error: null,
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [authState, setAuthState] = useState<AuthState>({
-    accessToken: null,
-    refreshToken: null,
-    expiresIn: null,
-    roles: [],
-    canManageUsers: false,
-    permissions: null,
-    userName: null,
-    userId: null,
-    loading: false,
-    error: null,
-  });
+  // K-03: arranca en loading=true → el layout muestra el Splash hasta saber si hay sesión
+  // (antes se veía el login un instante y después rebotaba al panel).
+  const [authState, setAuthState] = useState<AuthState>({ ...EMPTY_STATE, loading: true });
 
   // C-06: evita múltiples refresh paralelos cuando llegan varios 401 a la vez
   const refreshPromiseRef = useRef<Promise<any> | null>(null);
@@ -213,7 +204,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const decoded = jwtDecode<any>(token);
       const currentTime = Date.now() / 1000;
-      return decoded.exp - currentTime < 300; 
+      return decoded.exp - currentTime < 300;
     } catch {
       return true;
     }
@@ -224,24 +215,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     refreshPromiseRef.current = (async () => {
     try {
-      let refreshToken = tokenToUse || authState.refreshToken;
-      
+      let refreshToken = tokenToUse || refreshTokenRef.current;
+
       if (!refreshToken) {
-        const storedRefreshToken = await Storage.getItem('refreshToken');
-        if (!storedRefreshToken) {
+        const { refreshToken: stored } = await Storage.multiGet(['refreshToken']);
+        if (!stored) {
           throw new Error("No refresh token available");
         }
-        refreshToken = storedRefreshToken;
+        refreshToken = stored;
       }
-      const response = await axios.post(
-        `${API_KEYCLOAK_ADAPTER_URL}/token`,
-        new URLSearchParams({
-          grant_type: 'refresh_token',
-          refresh_token: refreshToken,
-          client_id: 'klaro-frontend',
-        }),
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-      );
+      const response = await kc.post('/token', new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: CLIENT_ID,
+      }));
 
       const { access_token, refresh_token, expires_in } = response.data;
       const decodedToken = jwtDecode<any>(access_token);
@@ -272,6 +259,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ['permissions', JSON.stringify(permissions)],
       ]);
 
+      refreshTokenRef.current = refresh_token;
       setAxiosAuthHeader(access_token);
       scheduleRefresh(access_token);
       setAuthState(prev => ({
@@ -290,8 +278,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       return response.data;
     } catch (error: any) {
-      if (error.response?.status === 401 || error.response?.status === 403) {
-        await logout();
+      // K-05: con el refresh vencido Keycloak responde 400 invalid_grant (no 401).
+      // Cualquier rechazo del servidor limpia la sesión guardada; un error de red NO
+      // (puede ser un corte momentáneo y el refresh sigue siendo válido).
+      if (!isNetworkError(error)) {
+        await clearSession();
       }
       throw error;
     } finally {
@@ -302,21 +293,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return refreshPromiseRef.current;
   };
 
-  const login = async (username: string, password: string): Promise<boolean> => {
+  const login = async (username: string, password: string): Promise<true> => {
     try {
-      const response = await axios.post(
-        `${API_KEYCLOAK_ADAPTER_URL}/token`,
-        new URLSearchParams({
-          grant_type: 'password',
-          username,
-          password,
-          client_id: 'klaro-frontend',
-        }),
-        { 
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, 
-          withCredentials: false
-        }
-      );
+      // L-02: solo se recorta el usuario; la contraseña va tal cual (puede tener espacios).
+      const response = await kc.post('/token', new URLSearchParams({
+        grant_type: 'password',
+        username: username.trim(),
+        password,
+        client_id: CLIENT_ID,
+      }));
 
       const { access_token, refresh_token, expires_in } = response.data;
       const decodedToken = jwtDecode<any>(access_token);
@@ -349,6 +334,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ['permissions', JSON.stringify(permissions)],
       ]);
 
+      refreshTokenRef.current = refresh_token;
       scheduleRefresh(access_token);
       setAuthState({
         accessToken: access_token,
@@ -364,74 +350,62 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       return true;
-    } catch (error) {
-      console.error('Login error:', error);
-      setAuthState(prev => ({
-        ...prev,
-        error: 'Error durante el inicio de sesión',
-        loading: false,
-      }));
-      return false;
+    } catch (error: any) {
+      const status = error?.response?.status;
+      const code: AuthErrorCode =
+        status === 400 || status === 401 ? 'credentials'
+        : isNetworkError(error) ? 'network'
+        : status >= 500 ? 'server'
+        : 'unknown';
+      setAxiosAuthHeader(null);
+      setAuthState(prev => ({ ...prev, error: code, loading: false }));
+      throw new AuthError(code);
     }
   };
 
-  const logout = async () => {
+  /** Borra la sesión local (storage, header, timers) sin hablar con Keycloak. */
+  const clearSession = async () => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    try {
-      await Storage.multiRemove([
-        'accessToken',
-        'refreshToken',
-        'expiresIn',
-        'userName',
-        'userId',
-        'roles',
-        'canManageUsers',
-        'permissions'
-      ]);
+    refreshTokenRef.current = null;
+    await Storage.clear();
+    setAxiosAuthHeader(null);
+    setAuthState(EMPTY_STATE);
+  };
 
-      setAxiosAuthHeader(null);
-      setAuthState({
-        accessToken: null,
-        refreshToken: null,
-        expiresIn: null,
-        roles: [],
-        canManageUsers: false,
-        permissions: null,
-        userName: null,
-        userId: null,
-        loading: false,
-        error: null,
-      });
-    } catch (error) {
-      console.error('Logout error:', error);
+  const logout = async () => {
+    // K-06: cerrar también la sesión en Keycloak para invalidar el refresh token.
+    // Sin await: si Keycloak no responde, el usuario igual sale.
+    const refreshToken = refreshTokenRef.current;
+    if (refreshToken) {
+      kc.post('/logout', new URLSearchParams({ client_id: CLIENT_ID, refresh_token: refreshToken })).catch(() => {});
     }
+    await clearSession();
   };
 
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        const storageData = await Storage.multiGet([
-          'accessToken',
-          'refreshToken',
-          'expiresIn',
-          'userName',
-          'userId',
-          'roles',
-          'canManageUsers',
-          'permissions'
-        ]);
-    
-        const storageMap = Object.fromEntries(storageData);
+        const storageMap = await Storage.multiGet(SESSION_KEYS);
         const accessToken = storageMap.accessToken;
         const refreshToken = storageMap.refreshToken;
-        
+
         if (accessToken && refreshToken) {
+          refreshTokenRef.current = refreshToken;
+          // El refresh conserva canManageUsers/permissions desde los refs: cargarlos del
+          // storage ANTES de refrescar (si no, un manager con token por vencer perdía el menú).
+          canManageUsersRef.current = storageMap.canManageUsers === 'true';
+          try {
+            permissionsRef.current = storageMap.permissions ? JSON.parse(storageMap.permissions) : null;
+          } catch {
+            permissionsRef.current = null;
+          }
           try {
             if (isTokenExpiringSoon(accessToken)) {
               await refreshAccessToken();
             } else {
               setAxiosAuthHeader(accessToken);
-              
+              scheduleRefresh(accessToken);
+
               let roles: string[] = [];
               try {
                 if (storageMap.roles) {
@@ -439,7 +413,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
               } catch (e) {
               }
-              
+
               let permissions: string[] | null = null;
               try {
                 if (storageMap.permissions) {
@@ -462,16 +436,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               });
             }
           } catch (tokenError) {
-            setAuthState(prev => ({
-              ...prev,
-              accessToken: null,
-              refreshToken: null,
-              roles: [],
-              canManageUsers: false,
-              permissions: null,
-              loading: false,
-              error: null
-            }));
+            // Rechazo del servidor: refreshAccessToken ya limpió el storage (K-05).
+            // Error de red: se conserva lo guardado para reintentar en la próxima carga.
+            setAuthState({ ...EMPTY_STATE });
           }
         } else {
           setAuthState(prev => ({ ...prev, loading: false }));
@@ -492,6 +459,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const originalRequest = error.config;
         if (
           error.response?.status === 401 &&
+          originalRequest &&
           !originalRequest._retry &&
           refreshTokenRef.current
         ) {
@@ -501,7 +469,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             originalRequest.headers['Authorization'] = `Bearer ${newTokens.access_token}`;
             return axios(originalRequest);
           } catch (refreshError) {
-            await logout();
+            // refreshAccessToken ya limpió la sesión si Keycloak la rechazó (K-05).
             return Promise.reject(error);
           }
         }

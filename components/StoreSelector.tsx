@@ -1,37 +1,27 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { RadioButton, Text, ActivityIndicator } from 'react-native-paper';
-import axios from 'axios';
-import { REACT_APP_API_URL } from '../config';
+import { useStore } from '../context/StoreContext';
 import { COLOR, SPACE, FONT_SIZE, FONT_WEIGHT } from '../theme';
 
-interface Store {
-  id: number;
-  name: string;
-}
-
 interface StoreSelectorProps {
-  selectedStore: number;
+  selectedStore: number | null | undefined;
   onStoreChange: (storeId: number) => void;
   style?: any;
 }
 
+/**
+ * N-08: usa los locales de StoreContext (una sola fuente de verdad) en vez de
+ * pedirlos de nuevo, y tolera selectedStore nulo (antes explotaba en toString()).
+ */
 const StoreSelector: React.FC<StoreSelectorProps> = ({ selectedStore, onStoreChange, style }) => {
-  const [stores, setStores]     = useState<Store[]>([]);
-  const [loading, setLoading]   = useState(true);
+  const { stores, loadingStores } = useStore();
+  const loading = loadingStores;
 
+  // Auto-seleccionar el primero si no hay ninguno seleccionado
   useEffect(() => {
-    axios.get<Store[]>(`${REACT_APP_API_URL}/api/v2/stores/active`)
-      .then(res => {
-        setStores(res.data);
-        // Auto-seleccionar el primero si no hay ninguno seleccionado
-        if (!selectedStore && res.data.length > 0) {
-          onStoreChange(res.data[0].id);
-        }
-      })
-      .catch(() => setStores([]))
-      .finally(() => setLoading(false));
-  }, []);
+    if (!selectedStore && stores.length > 0) onStoreChange(stores[0].id);
+  }, [selectedStore, stores]);
 
   if (loading) {
     return <ActivityIndicator size="small" color={COLOR.brand} style={{ marginVertical: SPACE.s3 }} />;
@@ -46,7 +36,7 @@ const StoreSelector: React.FC<StoreSelectorProps> = ({ selectedStore, onStoreCha
       <Text style={styles.label}>Seleccionar local:</Text>
       <RadioButton.Group
         onValueChange={(value) => onStoreChange(Number(value))}
-        value={selectedStore.toString()}
+        value={String(selectedStore ?? '')}
       >
         {stores.map(store => (
           <RadioButton.Item

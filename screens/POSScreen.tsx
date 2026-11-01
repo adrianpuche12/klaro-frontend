@@ -1,20 +1,22 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput as RNTextInput, ActivityIndicator, Modal,
-  useWindowDimensions, Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { Button, Snackbar } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import ConfirmDialog from '../components/ConfirmDialog';
-import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, CONTROL } from '../theme';
+import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../theme';
 import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
-import { useStore } from '../context/StoreContext';
+import { useStore, Store } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { stockColor } from '../utils/stockStatus';
 import { useMoney } from '../context/TenantConfigContext';
-import { APP_LOCALE } from '../utils/format';
+import { APP_LOCALE, formatTime } from '../utils/format';
+import { BRAND_NAME } from '../constants/brand';
+import Ticket, { CartItem } from './pos/Ticket';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -28,7 +30,6 @@ interface StockItem {
   productType: string; productActive: boolean; price: number; quantity: number;
   minStock: number; lowStock: boolean; categoryPath: string; categoryId: number | null;
 }
-interface CartItem { productId: number; productName: string; price: number; qty: number; subtotal: number; }
 interface SaleRecord {
   id: number; shiftId: number; username: string; saleDate: string; status: string;
   subtotal: number; isv: number; total: number; createdAt: string;
@@ -57,8 +58,8 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
 
-  const { selectedStore, stores, setSelectedStore } = useStore();
-  const { userName } = useAuth();
+  const { selectedStore, stores, setSelectedStore, loadingStores, storesError, refreshStores } = useStore();
+  const { userName, logout } = useAuth();
   const storeId = selectedStore?.id ?? null;
   const API     = REACT_APP_API_URL;
 
@@ -66,33 +67,39 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
 
   const [shift, setShift]             = useState<Shift | null>(null);
   const [loadingShift, setLoadingShift] = useState(true);
+  // P-07: un error de red al consultar el turno NO es "sin turno activo".
+  const [shiftError, setShiftError]   = useState(false);
+  // P-03: evita doble POST al abrir turno o confirmar el cierre.
+  const [shiftBusy, setShiftBusy]     = useState(false);
   const [categories, setCategories]   = useState<Category[]>([]);
   const [stock, setStock]             = useState<StockItem[]>([]);
   const [loading, setLoading]         = useState(false);
   const [selectedCat, setSelectedCat] = useState<number | null>(null);
   const [search, setSearch]           = useState('');
 
-  // KPIs del turno (ventas confirmadas + total acumulado)
-  const [kpiCount, setKpiCount]       = useState(0);
-  const [kpiTotal, setKpiTotal]       = useState(0);
-
   // Selección y cantidad pendiente (no se agrega al carrito hasta click en Agregar)
   const [selectedId, setSelectedId]   = useState<number | null>(null);
   const [pendingQty, setPendingQty]   = useState(1);
 
-  // Carrito: array fijo — solo se puede eliminar, no editar qty
+  // Carrito: array fijo — solo se puede eliminar, no editar qty (P-14: decisión de producto pendiente)
   const [cart, setCart]               = useState<CartItem[]>([]);
   const [snackbar, setSnackbar]       = useState('');
   const [submitting, setSubmitting]   = useState(false);
 
   // Tab del POS
   const [posTab, setPosTab]               = useState<'nueva' | 'ventas'>('nueva');
+  // P-11: única fuente para los KPIs del turno y el contador de la pestaña
+  // (antes había un KPI optimista aparte que se desfasaba del listado).
   const [shiftSales, setShiftSales]       = useState<SaleRecord[]>([]);
   const [loadingSales, setLoadingSales]   = useState(false);
   const [cancellingId, setCancellingId]   = useState<number | null>(null);
-  const [confirmDlg, setConfirmDlg]       = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
-  const askConfirm = (title: string, message: string, onConfirm: () => void) =>
-    setConfirmDlg({ title, message, onConfirm });
+  const [confirmDlg, setConfirmDlg]       = useState<{
+    title: string; message: string; onConfirm: () => void; confirmLabel?: string; confirmColor?: string;
+  } | null>(null);
+  const askConfirm = (
+    title: string, message: string, onConfirm: () => void,
+    opts?: { confirmLabel?: string; confirmColor?: string },
+  ) => setConfirmDlg({ title, message, onConfirm, ...opts });
 
   // Modales
   const [openShiftModal, setOpenShiftModal] = useState(false);
@@ -100,53 +107,95 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
   const [summary, setSummary]               = useState<DailySummary | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [closingDone, setClosingDone]       = useState(false);
+  // En nativo el Snackbar queda detrás del Modal: el error del cierre se muestra dentro del modal.
+  const [closingError, setClosingError]     = useState<string | null>(null);
+
+  // P-10: local y turno "vigentes". Una respuesta que llega tarde de otro local/turno se descarta.
+  const storeRef   = useRef(storeId);
+  const shiftIdRef = useRef<number | null>(null);
+  useEffect(() => { storeRef.current = storeId; }, [storeId]);
+  useEffect(() => { shiftIdRef.current = shift?.id ?? null; }, [shift]);
+
+  // P-11: KPIs derivados del listado del servidor (mismo dato que el contador de la pestaña).
+  const kpiCount = shiftSales.length;
+  const kpiTotal = shiftSales.reduce((s, v) => s + Number(v.total ?? 0), 0);
+
+  /** P-12: el usuario que audita la operación no se inventa ("empleada"). Sin usuario no hay sesión válida. */
+  const requireUser = (): string | null => {
+    if (userName) return userName;
+    setSnackbar('Tu sesión no es válida. Volvé a ingresar.');
+    logout();
+    return null;
+  };
 
   // ── Cargar turno y catálogo ───────────────────────────────────────────────
 
   const loadShift = useCallback(async () => {
-    if (!storeId) return;
+    // P-08: sin local no hay nada que cargar; antes loadingShift quedaba en true para siempre.
+    if (!storeId) { setShift(null); setShiftError(false); setLoadingShift(false); return; }
+    const reqStore = storeId;
     setLoadingShift(true);
+    setShiftError(false);
     try {
-      const res = await axios.get<Shift>(`${API}/api/v2/shifts/active/${storeId}`);
-      setShift(res.data ?? null);
-    } catch { setShift(null); }
-    finally { setLoadingShift(false); }
+      const res = await axios.get<Shift | ''>(`${API}/api/v2/shifts/active/${storeId}`, { timeout: 15000 });
+      if (storeRef.current !== reqStore) return;
+      // ShiftController.getActiveShift responde 204 sin cuerpo cuando no hay turno abierto.
+      setShift(res.status === 204 || !res.data ? null : res.data);
+    } catch (e: any) {
+      if (storeRef.current !== reqStore) return;
+      setShift(null);
+      // 404 se trata como "sin turno" por compatibilidad; cualquier otro error (red,
+      // timeout, 5xx, 403) bloquea con "No pudimos verificar el turno" (P-07).
+      if (e?.response?.status !== 404) setShiftError(true);
+    } finally {
+      if (storeRef.current === reqStore) setLoadingShift(false);
+    }
   }, [storeId]);
 
   const loadCatalog = useCallback(async () => {
     if (!storeId) return;
+    const reqStore = storeId;
     setLoading(true);
     try {
       const [catRes, stockRes] = await Promise.all([
         axios.get<Category[]>(`${API}/api/v2/stores/${storeId}/categories`),
         axios.get<StockItem[]>(`${API}/api/v2/stores/${storeId}/stock`),
       ]);
+      if (storeRef.current !== reqStore) return; // P-10
       setCategories(catRes.data);
       setStock(stockRes.data.filter(s => s.productActive));
-    } catch { setSnackbar('Error al cargar catálogo'); }
-    finally { setLoading(false); }
+    } catch {
+      if (storeRef.current === reqStore) setSnackbar('Error al cargar catálogo');
+    } finally {
+      if (storeRef.current === reqStore) setLoading(false);
+    }
   }, [storeId]);
 
   useEffect(() => { loadShift(); }, [loadShift]);
-  useEffect(() => { loadCatalog(); setCart([]); setSelectedId(null); setPendingQty(1); }, [loadCatalog]);
+  useEffect(() => {
+    // Cambio de local: se descarta lo del local anterior antes de cargar el nuevo (P-10).
+    setStock([]); setCategories([]); setSelectedCat(null);
+    loadCatalog(); setCart([]); setSelectedId(null); setPendingQty(1);
+  }, [loadCatalog]);
 
   const loadShiftSales = useCallback(async () => {
     if (!shift) return;
+    const reqShift = shift.id;
     setLoadingSales(true);
     try {
       const res = await axios.get<SaleRecord[]>(`${API}/api/v2/shifts/${shift.id}/sales`);
-      setShiftSales(res.data);
-      // Actualiza KPIs con datos reales del servidor
-      setKpiCount(res.data.length);
-      setKpiTotal(res.data.reduce((s, v) => s + v.total, 0));
-    } catch { /* silencioso */ }
+      if (shiftIdRef.current !== reqShift) return; // P-10
+      // P-11: una venta anulada se BORRA en el backend (SalesService.cancelSale ->
+      // saleRepository.delete) y SaleStatus solo tiene OPEN/CONFIRMED: no hace falta filtrar.
+      setShiftSales(res.data ?? []);
+    } catch { /* silencioso: se conservan los datos anteriores */ }
     finally { setLoadingSales(false); }
   }, [shift]);
 
-  // Carga KPIs al activarse el turno
+  // Carga ventas/KPIs al activarse el turno
   useEffect(() => {
     if (shift) loadShiftSales();
-    else { setKpiCount(0); setKpiTotal(0); }
+    else setShiftSales([]);
   }, [shift]);
 
   const handleSwitchTab = (tab: 'nueva' | 'ventas') => {
@@ -161,17 +210,28 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
       async () => {
         setCancellingId(saleId);
         try {
-          const cancelled = shiftSales.find(s => s.id === saleId);
           await axios.delete(`${API}/api/v2/sales/${saleId}`);
-          setShiftSales(prev => prev.filter(s => s.id !== saleId));
-          if (cancelled) {
-            setKpiCount(prev => Math.max(0, prev - 1));
-            setKpiTotal(prev => Math.max(0, prev - cancelled.total));
-          }
+          setShiftSales(prev => prev.filter(s => s.id !== saleId)); // los KPIs derivados bajan solos
+          setSnackbar('Venta anulada');
           loadCatalog();
         } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error al anular'); }
         finally { setCancellingId(null); }
-      }
+      },
+      { confirmLabel: 'Sí, anular', confirmColor: COLOR.expense },
+    );
+  };
+
+  // P-09: cambiar de local con productos cargados pide confirmación (antes el
+  // useEffect de loadCatalog vaciaba el carrito sin avisar).
+  const changeStore = (s: Store) => {
+    if (s.id === selectedStore?.id) return;
+    if (cart.length === 0) { setSelectedStore(s); return; }
+    const n = cart.reduce((acc, i) => acc + i.qty, 0);
+    askConfirm(
+      'Cambiar de local',
+      `Se va a descartar la venta en curso (${n} ${n === 1 ? 'artículo' : 'artículos'}).`,
+      () => setSelectedStore(s),
+      { confirmLabel: 'Cambiar de local', confirmColor: COLOR.warn },
     );
   };
 
@@ -200,6 +260,8 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
 
   // ── Carrito ───────────────────────────────────────────────────────────────
 
+  // Estimación local: el total real (impuestos/recargos del tenant) lo calcula el
+  // backend y se informa al confirmar la venta (P-06).
   const cartSubtotal  = cart.reduce((s, i) => s + i.subtotal, 0);
   const cartISV       = cartSubtotal * ISV;
   const cartTotal     = cartSubtotal + cartISV;
@@ -221,6 +283,8 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
   const addToCart = () => {
     const item = stock.find(s => s.productId === selectedId);
     if (!item || pendingQty < 1) return;
+    // P-04: nunca más de lo que hay en stock (el backend además aborta la venta entera).
+    if (pendingQty > item.quantity) { setSnackbar(`Solo hay ${item.quantity} en stock`); return; }
     setCart(prev => [...prev, { productId: item.productId, productName: item.productName, price: item.price, qty: pendingQty, subtotal: item.price * pendingQty }]);
     setSelectedId(null);
     setPendingQty(1);
@@ -234,32 +298,37 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
   // ── Abrir turno ───────────────────────────────────────────────────────────
 
   const handleOpenShift = async () => {
-    if (!storeId) return;
+    if (!storeId || shiftBusy) return;
+    const username = requireUser();
+    if (!username) return;
+    setShiftBusy(true);
     try {
-      const res = await axios.post<Shift>(`${API}/api/v2/stores/${storeId}/shifts`, { username: userName ?? 'empleada' });
+      const res = await axios.post<Shift>(`${API}/api/v2/stores/${storeId}/shifts`, { username });
       setShift(res.data);
+      setShiftError(false);
       setOpenShiftModal(false);
       setSnackbar(`Turno ${res.data.code} abierto`);
     } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error al abrir turno'); }
+    finally { setShiftBusy(false); }
   };
 
   // ── Confirmar venta ───────────────────────────────────────────────────────
 
   const handleSubmitSale = async () => {
-    if (!shift || cart.length === 0) return;
+    if (!shift || cart.length === 0 || submitting) return;
+    const username = requireUser();
+    if (!username) return;
     setSubmitting(true);
     try {
-      await axios.post(`${API}/api/v2/shifts/${shift.id}/sales`, {
-        username: userName ?? 'empleada',
+      const res = await axios.post<SaleRecord>(`${API}/api/v2/shifts/${shift.id}/sales`, {
+        username,
         items: cart.map(i => ({ productId: i.productId, quantity: i.qty })),
       });
-      // Actualiza KPIs localmente (optimista, sin esperar al servidor)
-      const saleTotal = cartTotal;
-      setKpiCount(prev => prev + 1);
-      setKpiTotal(prev => prev + saleTotal);
       clearCart();
+      // P-06: aviso con el total que registró el servidor, en la moneda de la empresa.
+      setSnackbar(`Venta registrada · ${money(res.data?.total ?? cartTotal)}`);
       loadCatalog();
-      if (posTab === 'ventas') loadShiftSales();
+      loadShiftSales(); // P-11: KPIs y contador desde el servidor, no optimistas
     } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error al registrar venta'); }
     finally { setSubmitting(false); }
   };
@@ -271,6 +340,7 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
     setLoadingSummary(true);
     setClosingModal(true);
     setClosingDone(false);
+    setClosingError(null);
     try {
       const res = await axios.get<DailySummary>(`${API}/api/v2/shifts/${shift.id}/summary`);
       setSummary(res.data);
@@ -279,20 +349,85 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
   };
 
   const handleConfirmClosing = async () => {
-    if (!shift) return;
+    if (!shift || shiftBusy) return;
+    const username = requireUser();
+    if (!username) return;
+    setShiftBusy(true);
+    setClosingError(null);
     try {
-      await axios.post(`${API}/api/v2/shifts/${shift.id}/closing`, { username: userName ?? 'empleada' });
+      await axios.post(`${API}/api/v2/shifts/${shift.id}/closing`, { username });
       setClosingDone(true);
       setShift(null);
       clearCart();
-    } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error al confirmar cierre'); }
+    } catch (e: any) { setClosingError(e.response?.data?.error || 'Error al confirmar cierre'); }
+    finally { setShiftBusy(false); }
   };
+
+  // Chips de local (solo admin). Reusados en "sin turno", "error de turno" y encabezado.
+  const storeChips = !hideStoreSelector && stores.length > 0 ? (
+    <View style={styles.localChips}>
+      {stores.map(s => (
+        <TouchableOpacity
+          key={s.id}
+          style={[styles.localChip, selectedStore?.id === s.id && styles.localChipActive]}
+          onPress={() => changeStore(s)}
+          accessibilityRole="button"
+          accessibilityState={{ selected: selectedStore?.id === s.id }}
+        >
+          <Text style={[styles.localChipText, selectedStore?.id === s.id && styles.localChipTextActive]}>{s.name}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  ) : null;
 
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
 
+  // ── P-08: sin local elegido (antes: spinner infinito) ─────────────────────
+
+  if (!storeId) return (
+    <View style={styles.noShift}>
+      {loadingStores ? (
+        <ActivityIndicator size="large" color={COLOR.brand} />
+      ) : storesError ? (
+        <>
+          <MaterialCommunityIcons name="wifi-off" size={52} color={COLOR.warn} />
+          <Text style={styles.noShiftTitle}>No se pudieron cargar los locales</Text>
+          <Text style={styles.noShiftSub}>Revisá la conexión e intentá de nuevo.</Text>
+          <Button mode="contained" onPress={() => { refreshStores(); }} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ borderRadius: RADIUS.r2 }}>
+            Reintentar
+          </Button>
+        </>
+      ) : (
+        <>
+          <MaterialCommunityIcons name="store-off-outline" size={52} color={COLOR.inkDisabled} />
+          <Text style={styles.noShiftTitle}>Elegí un local</Text>
+          <Text style={styles.noShiftSub}>
+            {stores.length === 0 ? 'No hay locales activos. Pedí al administrador que active uno.' : 'No hay un local activo seleccionado.'}
+          </Text>
+          {storeChips}
+        </>
+      )}
+    </View>
+  );
+
   if (loadingShift) return <ActivityIndicator size="large" color={COLOR.brand} style={{ flex: 1, marginTop: 60 }} />;
+
+  // ── P-07: no se pudo verificar el turno (red/servidor) ────────────────────
+  // No se ofrece "Abrir turno": el local podría tener uno abierto.
+
+  if (shiftError) return (
+    <View style={styles.noShift}>
+      <MaterialCommunityIcons name="wifi-off" size={52} color={COLOR.warn} />
+      <Text style={styles.noShiftTitle}>No pudimos verificar el turno</Text>
+      <Text style={styles.noShiftSub}>Revisá la conexión. No abras otro turno hasta confirmar.</Text>
+      {storeChips}
+      <Button mode="contained" onPress={() => { loadShift(); }} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ borderRadius: RADIUS.r2 }}>
+        Reintentar
+      </Button>
+    </View>
+  );
 
   // ── Sin turno activo ──────────────────────────────────────────────────────
 
@@ -302,30 +437,24 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
       <Text style={styles.noShiftTitle}>Sin turno activo</Text>
       <Text style={styles.noShiftSub}>Abrí un turno para comenzar a registrar ventas</Text>
 
-      {/* Selector de local — solo para admin */}
-      {!hideStoreSelector && (
-        <View style={styles.localChips}>
-          {stores.map(s => (
-            <TouchableOpacity key={s.id} style={[styles.localChip, selectedStore?.id === s.id && styles.localChipActive]} onPress={() => setSelectedStore(s)}>
-              <Text style={[styles.localChipText, selectedStore?.id === s.id && styles.localChipTextActive]}>{s.name}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
+      {/* Selector de local — solo para admin. El cajero ve en qué local está (P-01). */}
+      {hideStoreSelector
+        ? <Text style={styles.noShiftStore}>Local: {selectedStore?.name ?? '—'}</Text>
+        : storeChips}
 
       <Button mode="contained" onPress={() => setOpenShiftModal(true)} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ borderRadius: RADIUS.r2 }} labelStyle={{ fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.black as any }}>
         Abrir turno
       </Button>
 
-      <Modal visible={openShiftModal} transparent animationType="fade" onRequestClose={() => setOpenShiftModal(false)}>
+      <Modal visible={openShiftModal} transparent animationType="fade" onRequestClose={() => !shiftBusy && setOpenShiftModal(false)}>
         <View style={styles.overlay}>
           <View style={styles.modal}>
             <Text style={styles.modalTitle}>Abrir turno</Text>
             <Text style={styles.modalSub}>Local: <Text style={{ fontWeight: '900' }}>{selectedStore?.name ?? '—'}</Text></Text>
-            <Text style={styles.modalSub}>Atendió: <Text style={{ fontWeight: '900' }}>{userName ?? '—'}</Text></Text>
+            <Text style={styles.modalSub}>Atiende: <Text style={{ fontWeight: '900' }}>{userName ?? '—'}</Text></Text>
             <View style={styles.modalActions}>
-              <Button mode="outlined" onPress={() => setOpenShiftModal(false)} style={{ flex: 1 }}>Cancelar</Button>
-              <Button mode="contained" onPress={handleOpenShift} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Confirmar</Button>
+              <Button mode="outlined" onPress={() => setOpenShiftModal(false)} disabled={shiftBusy} style={{ flex: 1 }}>Cancelar</Button>
+              <Button mode="contained" onPress={handleOpenShift} loading={shiftBusy} disabled={shiftBusy} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Confirmar</Button>
             </View>
           </View>
         </View>
@@ -345,20 +474,12 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
       {/* ══ HEADER ══ */}
       <View style={styles.header}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.headerBrand}>{shift.storeName ?? 'Belopia'}</Text>
+          <Text style={styles.headerBrand}>{shift.storeName ?? BRAND_NAME}</Text>
           <Text style={styles.headerShift} numberOfLines={1}>● {shift.code} · {shift.username}</Text>
         </View>
 
-        {/* Selector de local — oculto para empleados (hideStoreSelector=true) */}
-        {!hideStoreSelector && (
-          <View style={styles.localChips}>
-            {stores.map(s => (
-              <TouchableOpacity key={s.id} style={[styles.localChip, selectedStore?.id === s.id && styles.localChipActive]} onPress={() => setSelectedStore(s)}>
-                <Text style={[styles.localChipText, selectedStore?.id === s.id && styles.localChipTextActive]}>{s.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
+        {/* Selector de local — oculto para empleados (hideStoreSelector=true). P-09: confirma si hay carrito. */}
+        {storeChips}
 
         <Button mode="outlined" onPress={openClosing} textColor={COLOR.expense} style={{ borderColor: COLOR.expense, borderRadius: RADIUS.r1 }} labelStyle={{ fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.black as any }}>
           Cerrar turno
@@ -378,8 +499,9 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
         </View>
         <View style={styles.kpiDivider} />
         <View style={styles.kpiItem}>
-          <Text style={styles.kpiLabel}>Turno</Text>
-          <Text style={styles.kpiValue} numberOfLines={1}>{shift?.code ?? '—'}</Text>
+          {/* P-17: el código del turno ya está en el encabezado; acá va la hora de apertura. */}
+          <Text style={styles.kpiLabel}>Abierto a las</Text>
+          <Text style={styles.kpiValue} numberOfLines={1}>{shift.openedAt ? formatTime(shift.openedAt) : '—'}</Text>
         </View>
       </View>
 
@@ -477,19 +599,35 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
 
                       {/* Fila 3: qty controls + Agregar (solo cuando está seleccionado) */}
                       {isSelected ? (
-                        <View style={styles.pcBottom}>
-                          <View style={styles.qtyControl}>
-                            <TouchableOpacity style={styles.qtyBtn} onPress={() => setPendingQty(q => Math.max(1, q - 1))}>
-                              <Text style={styles.qtyBtnText}>−</Text>
-                            </TouchableOpacity>
-                            <Text style={styles.qtyNum}>{pendingQty}</Text>
-                            <TouchableOpacity style={styles.qtyBtn} onPress={() => setPendingQty(q => q + 1)}>
-                              <Text style={styles.qtyBtnText}>+</Text>
+                        <View>
+                          <View style={styles.pcBottom}>
+                            <View style={styles.qtyControl}>
+                              <TouchableOpacity
+                                style={[styles.qtyBtn, pendingQty <= 1 && styles.qtyBtnDisabled]}
+                                onPress={() => setPendingQty(q => Math.max(1, q - 1))}
+                                disabled={pendingQty <= 1}
+                                accessibilityRole="button"
+                                accessibilityLabel="Restar uno"
+                              >
+                                <Text style={styles.qtyBtnText}>−</Text>
+                              </TouchableOpacity>
+                              <Text style={styles.qtyNum}>{pendingQty}</Text>
+                              {/* P-04: tope = stock disponible */}
+                              <TouchableOpacity
+                                style={[styles.qtyBtn, pendingQty >= item.quantity && styles.qtyBtnDisabled]}
+                                onPress={() => setPendingQty(q => Math.min(item.quantity, q + 1))}
+                                disabled={pendingQty >= item.quantity}
+                                accessibilityRole="button"
+                                accessibilityLabel="Sumar uno"
+                              >
+                                <Text style={styles.qtyBtnText}>+</Text>
+                              </TouchableOpacity>
+                            </View>
+                            <TouchableOpacity style={styles.addBtn} onPress={addToCart} accessibilityRole="button">
+                              <Text style={styles.addBtnText}>Agregar</Text>
                             </TouchableOpacity>
                           </View>
-                          <TouchableOpacity style={styles.addBtn} onPress={addToCart}>
-                            <Text style={styles.addBtnText}>Agregar</Text>
-                          </TouchableOpacity>
+                          {pendingQty >= item.quantity && <Text style={[styles.pcStock, styles.qtyMax]}>Máx. {item.quantity}</Text>}
                         </View>
                       ) : (
                         /* Estado inactivo */
@@ -507,8 +645,8 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
 
         {/* ══ TICKET ══ */}
         {isDesktop
-          ? <View style={styles.ticketDesktop}><Ticket cart={cart} subtotal={cartSubtotal} isv={cartISV} total={cartTotal} itemCount={cartItemCount} onRemove={removeFromCart} onClear={clearCart} onSubmit={handleSubmitSale} submitting={submitting} full /></View>
-          : <View style={styles.ticketMobile}><Ticket cart={cart} subtotal={cartSubtotal} isv={cartISV} total={cartTotal} itemCount={cartItemCount} onRemove={removeFromCart} onClear={clearCart} onSubmit={handleSubmitSale} submitting={submitting} full={false} /></View>
+          ? <View style={styles.ticketDesktop}><Ticket cart={cart} subtotal={cartSubtotal} total={cartTotal} itemCount={cartItemCount} onRemove={removeFromCart} onClear={clearCart} onSubmit={handleSubmitSale} submitting={submitting} full /></View>
+          : <View style={styles.ticketMobile}><Ticket cart={cart} subtotal={cartSubtotal} total={cartTotal} itemCount={cartItemCount} onRemove={removeFromCart} onClear={clearCart} onSubmit={handleSubmitSale} submitting={submitting} full={false} /></View>
         }
       </View>}
 
@@ -579,7 +717,7 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
       )}
 
       {/* ══ MODAL CIERRE DE TURNO ══ */}
-      <Modal visible={closingModal} transparent animationType="slide" onRequestClose={() => !closingDone && setClosingModal(false)}>
+      <Modal visible={closingModal} transparent animationType="slide" onRequestClose={() => !closingDone && !shiftBusy && setClosingModal(false)}>
         <View style={styles.overlay}>
           <View style={[styles.modal, { maxWidth: 520, maxHeight: '92%' }]}>
             {closingDone ? (
@@ -615,17 +753,20 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
                 <View style={{ gap: 4 }}>
                   <View style={styles.sumTotalRow}><Text style={styles.sumLabel}>Subtotal</Text><Text style={styles.sumValue}>{money(summary.totalSubtotal)}</Text></View>
                   <View style={[styles.sumTotalRow, { borderTopWidth: 2, borderTopColor: COLOR.ink, marginTop: 6, paddingTop: 6 }]}>
-                    <Text style={{ fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.black as any, color: COLOR.ink }}>Total del día</Text>
+                    {/* P-13: el resumen es del turno (SalesService.getDailySummary filtra por shiftId), no del día del local. */}
+                    <Text style={{ fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.black as any, color: COLOR.ink }}>Total del turno</Text>
                     <Text style={{ fontSize: FONT_SIZE.h2, fontWeight: FONT_WEIGHT.black as any, color: COLOR.ink }}>{money(summary.totalAmount)}</Text>
                   </View>
                   <Text style={{ fontSize: FONT_SIZE.caption, color: COLOR.ink2, marginTop: 4 }}>{summary.totalSales} venta{summary.totalSales !== 1 ? 's' : ''} registrada{summary.totalSales !== 1 ? 's' : ''}</Text>
                 </View>
 
                 <Text style={styles.closingWarn}>Esta acción no se puede deshacer</Text>
+                {closingError && <Text style={styles.closingError}>{closingError}</Text>}
 
                 <View style={styles.modalActions}>
-                  <Button mode="outlined" onPress={() => setClosingModal(false)} style={{ flex: 1 }}>Cancelar</Button>
-                  <Button mode="contained" buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }} onPress={handleConfirmClosing}>Confirmar cierre</Button>
+                  <Button mode="outlined" onPress={() => setClosingModal(false)} disabled={shiftBusy} style={{ flex: 1 }}>Cancelar</Button>
+                  {/* P-03: un solo POST /closing aunque se toque dos veces */}
+                  <Button mode="contained" buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }} onPress={handleConfirmClosing} loading={shiftBusy} disabled={shiftBusy}>Confirmar cierre</Button>
                 </View>
               </>
             ) : null}
@@ -637,81 +778,14 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
         visible={!!confirmDlg}
         title={confirmDlg?.title ?? ''}
         message={confirmDlg?.message ?? ''}
-        confirmLabel="Sí, anular"
-        confirmColor={COLOR.expense}
-        onConfirm={() => confirmDlg?.onConfirm()}
+        confirmLabel={confirmDlg?.confirmLabel ?? 'Confirmar'}
+        confirmColor={confirmDlg?.confirmColor ?? COLOR.expense}
+        // P-02: cerrar el diálogo ANTES de ejecutar; antes quedaba abierto y un segundo
+        // toque mandaba otro DELETE sobre la venta ya anulada.
+        onConfirm={() => { const fn = confirmDlg?.onConfirm; setConfirmDlg(null); fn?.(); }}
         onCancel={() => setConfirmDlg(null)}
       />
       <Snackbar visible={!!snackbar} onDismiss={() => setSnackbar('')} duration={2500}>{snackbar}</Snackbar>
-    </View>
-  );
-}
-
-// ─── Ticket (componente interno) ──────────────────────────────────────────────
-
-function Ticket({ cart, subtotal, isv, total, itemCount, onRemove, onClear, onSubmit, submitting, full }: {
-  cart: CartItem[];
-  subtotal: number; isv: number; total: number; itemCount: number;
-  onRemove: (id: number) => void;
-  onClear: () => void;
-  onSubmit: () => void;
-  submitting: boolean;
-  full: boolean;
-}) {
-  const money = useMoney();
-  return (
-    <View style={tkStyles.root}>
-      <View style={tkStyles.head}>
-        <Text style={tkStyles.title}>Venta actual</Text>
-        {itemCount > 0 && <View style={tkStyles.badge}><Text style={tkStyles.badgeText}>{itemCount} artículos</Text></View>}
-      </View>
-
-      {full && (
-        cart.length === 0
-          ? <View style={tkStyles.empty}><Text style={tkStyles.emptyText}>La venta actual está vacía.</Text></View>
-          : <ScrollView style={{ flex: 1 }}>
-              {cart.map(item => (
-                <View key={item.productId} style={tkStyles.item}>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={tkStyles.itemName} numberOfLines={1}>{item.productName}</Text>
-                    <Text style={tkStyles.itemCode}>{item.qty} × {money(item.price)}</Text>
-                  </View>
-                  <Text style={tkStyles.itemSub}>{money(item.subtotal)}</Text>
-                  <TouchableOpacity onPress={() => onRemove(item.productId)} style={tkStyles.deleteBtn} accessibilityRole="button" accessibilityLabel="Quitar del carrito">
-                    <MaterialCommunityIcons name="trash-can-outline" size={18} color={COLOR.expense} />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </ScrollView>
-      )}
-
-      {/* Totales */}
-      <View style={tkStyles.totals}>
-        <View style={tkStyles.totalLine}><Text style={tkStyles.totalLabel}>Subtotal</Text><Text style={tkStyles.totalValue}>{money(subtotal)}</Text></View>
-        <View style={[tkStyles.totalLine, tkStyles.totalFinal]}>
-          <Text style={tkStyles.totalLabelFinal}>TOTAL</Text>
-          <Text style={tkStyles.totalAmount}>{money(total)}</Text>
-        </View>
-      </View>
-
-      {/* Acciones */}
-      <View style={tkStyles.actions}>
-        <Button mode="contained" onPress={onSubmit} loading={submitting} disabled={cart.length === 0 || submitting}
-          buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ borderRadius: RADIUS.r2 }} labelStyle={{ fontWeight: FONT_WEIGHT.black as any }}>
-          Confirmar venta
-        </Button>
-        {cart.length > 0 && (
-          <Button mode="outlined" onPress={onClear} style={{ borderRadius: RADIUS.r2, marginTop: 6 }} textColor={COLOR.ink2}>
-            Cancelar venta
-          </Button>
-        )}
-      </View>
-
-      {full && cart.length > 0 && (
-        <View style={tkStyles.audit}>
-          <Text style={tkStyles.auditText}>El sistema calcula precios, impuestos y totales automáticamente. Al confirmar se descuenta el stock.</Text>
-        </View>
-      )}
     </View>
   );
 }
@@ -725,6 +799,7 @@ const styles = StyleSheet.create({
   noShift:        { flex: 1, justifyContent: 'center', alignItems: 'center', padding: SPACE.s8, gap: SPACE.s4 },
   noShiftTitle:   { fontSize: FONT_SIZE.h1, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
   noShiftSub:     { fontSize: FONT_SIZE.label, color: COLOR.inkMute, textAlign: 'center' },
+  noShiftStore:   { fontSize: FONT_SIZE.body, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
 
   // Header
   header:         { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: SPACE.s2, padding: SPACE.s3, backgroundColor: COLOR.brand, borderBottomWidth: 1, borderBottomColor: COLOR.brandDark },
@@ -741,7 +816,8 @@ const styles = StyleSheet.create({
   // KPIs bar del turno
   kpiBar:         { flexDirection: 'row', backgroundColor: COLOR.ink, paddingHorizontal: SPACE.s4, paddingVertical: SPACE.s2 },
   kpiItem:        { flex: 1, alignItems: 'center' },
-  kpiLabel:       { fontSize: FONT_SIZE.caption - 1, fontWeight: FONT_WEIGHT.semibold as any, color: COLOR.inkDisabled, marginBottom: 2 },
+  // P-15: antes 10 px en inkDisabled sobre ink (contraste insuficiente)
+  kpiLabel:       { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.semibold as any, color: COLOR.inkOnDark, marginBottom: 2 },
   kpiValue:       { fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.brand },
   kpiDivider:     { width: 1, backgroundColor: COLOR.ink2, marginVertical: 2 },
 
@@ -808,17 +884,20 @@ const styles = StyleSheet.create({
   pcCode:         { fontSize: FONT_SIZE.caption, color: COLOR.inkMute, fontWeight: FONT_WEIGHT.semibold as any, marginTop: 2 },
   pcPrice:        { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
   pcStock:        { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.semibold as any },
-  pcBottom:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SPACE.s2 },
+  // flexWrap: con los botones de 40 px (P-16) "Agregar" baja de línea en tarjetas angostas.
+  pcBottom:       { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: SPACE.s2 },
 
-  // Qty control (en card)
-  qtyControl:     { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: COLOR.border2, borderRadius: RADIUS.r1, overflow: 'hidden', height: 28 },
-  qtyBtn:         { width: 26, height: 28, justifyContent: 'center', alignItems: 'center', backgroundColor: COLOR.surface },
-  qtyBtnText:     { fontSize: 16, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, lineHeight: 18 },
+  // Qty control (en card) — P-16: 40×40 para pantallas táctiles (antes 26×28)
+  qtyControl:     { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: COLOR.border2, borderRadius: RADIUS.r1, overflow: 'hidden', height: 40 },
+  qtyBtn:         { width: 40, height: 40, justifyContent: 'center', alignItems: 'center', backgroundColor: COLOR.surface },
+  qtyBtnDisabled: { opacity: 0.35 },
+  qtyBtnText:     { fontSize: 18, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, lineHeight: 20 },
   qtyNum:         { width: 30, textAlign: 'center', fontSize: FONT_SIZE.label, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
+  qtyMax:         { color: COLOR.warn, marginTop: SPACE.s1 },
 
   // Agregar button — tint + borde, no relleno sólido: "Confirmar venta" es la
   // única acción de la pantalla que debe llevar el dorado sólido (regla 60-30-10).
-  addBtn:         { flex: 1, height: 30, backgroundColor: COLOR.brandTint, borderWidth: 1, borderColor: COLOR.brand, borderRadius: RADIUS.r2, justifyContent: 'center', alignItems: 'center' },
+  addBtn:         { flex: 1, minWidth: 72, height: 40, backgroundColor: COLOR.brandTint, borderWidth: 1, borderColor: COLOR.brand, borderRadius: RADIUS.r2, justifyContent: 'center', alignItems: 'center' },
   addBtnText:     { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.brandDeep },
 
   // Ticket
@@ -834,6 +913,7 @@ const styles = StyleSheet.create({
   sumLabel:       { fontSize: FONT_SIZE.label, color: COLOR.inkMute, fontWeight: FONT_WEIGHT.semibold as any },
   sumValue:       { fontSize: FONT_SIZE.label, color: COLOR.inkMute, fontWeight: FONT_WEIGHT.semibold as any },
   closingWarn:    { fontSize: FONT_SIZE.caption, color: COLOR.warn, fontWeight: FONT_WEIGHT.semibold as any, textAlign: 'center', marginVertical: SPACE.s2 },
+  closingError:   { fontSize: FONT_SIZE.label, color: COLOR.expense, fontWeight: FONT_WEIGHT.semibold as any, textAlign: 'center', backgroundColor: COLOR.expenseTint, borderRadius: RADIUS.r2, padding: SPACE.s2 },
 
   // Modales genéricos
   overlay:        { flex: 1, backgroundColor: COLOR.overlay, justifyContent: 'center', alignItems: 'center' },
@@ -841,34 +921,4 @@ const styles = StyleSheet.create({
   modalTitle:     { fontSize: FONT_SIZE.h1, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, marginBottom: SPACE.s1 },
   modalSub:       { fontSize: FONT_SIZE.label, color: COLOR.ink2, fontWeight: FONT_WEIGHT.medium as any, marginBottom: SPACE.s1 },
   modalActions:   { flexDirection: 'row', gap: SPACE.s2, marginTop: SPACE.s4 },
-});
-
-// ─── Estilos Ticket ───────────────────────────────────────────────────────────
-
-const tkStyles = StyleSheet.create({
-  root:           { flex: 1, padding: SPACE.s3, flexDirection: 'column' },
-  head:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SPACE.s2 },
-  title:          { fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
-  badge:          { backgroundColor: COLOR.brandTint, borderRadius: RADIUS.r2, paddingHorizontal: SPACE.s2, paddingVertical: SPACE.s1 },
-  badgeText:      { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.brandDeep },
-  empty:          { padding: SPACE.s4, borderRadius: RADIUS.r3, backgroundColor: COLOR.bg, alignItems: 'center' },
-  emptyText:      { color: COLOR.inkMute, fontWeight: FONT_WEIGHT.medium as any, fontSize: FONT_SIZE.label },
-
-  item:           { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: COLOR.border, gap: SPACE.s2, minHeight: 46 },
-  itemName:       { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
-  itemCode:       { fontSize: FONT_SIZE.caption, color: COLOR.inkMute, fontWeight: FONT_WEIGHT.medium as any },
-  itemSub:        { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, width: 70, textAlign: 'right' },
-  deleteBtn:      { marginLeft: SPACE.s2, padding: SPACE.s1 },
-
-  totals:         { paddingTop: SPACE.s2, gap: SPACE.s1, borderTopWidth: 1, borderTopColor: COLOR.border, marginTop: SPACE.s2 },
-  totalLine:      { flexDirection: 'row', justifyContent: 'space-between' },
-  totalFinal:     { borderTopWidth: 1, borderTopColor: COLOR.border, paddingTop: SPACE.s2, marginTop: SPACE.s1 },
-  totalLabel:     { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.medium as any, color: COLOR.inkMute },
-  totalValue:     { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.medium as any, color: COLOR.inkMute },
-  totalLabelFinal:{ fontSize: FONT_SIZE.body, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
-  totalAmount:    { fontSize: FONT_SIZE.amountHero - 10, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink, letterSpacing: -1 },
-
-  actions:        { marginTop: SPACE.s2 },
-  audit:          { marginTop: SPACE.s2, backgroundColor: COLOR.brandTint, borderWidth: 1, borderColor: COLOR.brandTint2, borderRadius: RADIUS.r3, padding: SPACE.s2 },
-  auditText:      { fontSize: FONT_SIZE.caption, fontWeight: FONT_WEIGHT.medium as any, color: COLOR.ink2 },
 });

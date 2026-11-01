@@ -1,7 +1,11 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Text } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Text, BackHandler, Platform } from 'react-native';
+import { Redirect, router, useLocalSearchParams } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import Sidebar, { SidebarScreen } from '../components/Sidebar';
+import Sidebar from '../components/Sidebar';
+import { useAuth } from '../context/AuthContext';
+import { canOpen, isPrivileged, menuFor, SCREEN_TITLE, SidebarScreen } from '../config/navConfig';
 import { COLOR, SPACE, FONT_SIZE, FONT_WEIGHT, CONTROL, BREAKPOINT } from '../theme';
 import AdminScreen from './AdminScreen';
 import StoresScreen from './StoresScreen';
@@ -14,34 +18,47 @@ import RolesScreen from './RolesScreen';
 import TenantConfigScreen from './TenantConfigScreen';
 import DynamicFormScreen from './DynamicFormScreen';
 
-const SCREEN_TITLE: Record<SidebarScreen, string> = {
-  dashboard:    'Dashboard',
-  operations:   'Operaciones',
-  finance:      'Finanzas',
-  inventory:    'Inventario',
-  stores:       'Locales',
-  salesHistory: 'Historial ventas',
-  users:        'Usuarios',
-  roles:        'Roles',
-  sales:        'Ventas',
-  tenantConfig: 'Configuración',
-};
-
 const AdminDashboard = () => {
   const { width } = useWindowDimensions();
   const isDesktop = width >= BREAKPOINT.desktop;
 
-  const [activeScreen, setActiveScreen] = useState<SidebarScreen>('dashboard');
-  const [drawerOpen, setDrawerOpen]     = useState(false);
+  const { roles, canManageUsers, permissions } = useAuth();
+  const access = { roles, canManageUsers, permissions };
+  const params = useLocalSearchParams<{ s?: string }>();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Primera pantalla del menú de este usuario (antes era siempre 'dashboard', aunque
+  // su menú no lo incluyera).
+  const home: SidebarScreen = menuFor(access)[0]?.key ?? 'sales';
+  // N-02: la pantalla activa vive en la URL (/admin?s=inventory): sobrevive a la recarga
+  // y se puede compartir. Una pantalla que este usuario no puede abrir cae en home.
+  const activeScreen: SidebarScreen = canOpen(access, params.s) ? params.s : home;
+  const go = (screen: SidebarScreen) => router.setParams({ s: screen });
+
+  // N-02: en Android, atrás vuelve al inicio del panel en vez de cerrar la app.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (drawerOpen) { setDrawerOpen(false); return true; }
+      if (activeScreen !== home) { go(home); return true; }
+      return false;
+    });
+    return () => sub.remove();
+  }, [activeScreen, home, drawerOpen]);
+
+  // K-01: el panel es solo para root y staff con canManageUsers, aunque se llegue
+  // escribiendo la URL. (El backend igual valida cada endpoint.)
+  if (!isPrivileged(access)) return <Redirect href="/" />;
 
   return (
-    <View style={styles.container}>
+    // N-04: respeta el notch en mobile.
+    <SafeAreaView style={styles.container} edges={isDesktop ? [] : ['top']}>
 
         {/* Sidebar fijo en desktop */}
         {isDesktop && (
           <Sidebar
             active={activeScreen}
-            onSelect={setActiveScreen}
+            onSelect={go}
             visible={false}
             onClose={() => {}}
           />
@@ -57,6 +74,8 @@ const AdminDashboard = () => {
                 onPress={() => setDrawerOpen(true)}
                 style={styles.menuBtn}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Abrir menú"
               >
                 <MaterialCommunityIcons name="menu" size={24} color={COLOR.ink} />
               </TouchableOpacity>
@@ -83,12 +102,12 @@ const AdminDashboard = () => {
         {!isDesktop && (
           <Sidebar
             active={activeScreen}
-            onSelect={setActiveScreen}
+            onSelect={go}
             visible={drawerOpen}
             onClose={() => setDrawerOpen(false)}
           />
         )}
-    </View>
+    </SafeAreaView>
   );
 };
 
