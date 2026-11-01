@@ -42,6 +42,7 @@ export const COLOR = {
   inkMute:       '#7A715F',  // texto apagado (placeholders, hints)
   inkDisabled:   '#B8B0A0',  // texto deshabilitado
   inkOnBrand:    '#1F1B16',  // texto sobre fondo brand (no blanco — evita bajo contraste)
+  inkOnDark:     '#C9C2B6',  // texto secundario sobre fondo ink (barra de KPIs del POS, P-15)
 
   // ── Semánticos ────────────────────────────────────────────────────────────
   income:        '#2E7D4F',  // verde — ingresos, stock OK, activo

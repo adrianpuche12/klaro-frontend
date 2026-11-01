@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions, Modal } from 'react-native';
-import { ActivityIndicator, IconButton } from 'react-native-paper';
+import { ActivityIndicator, Button, IconButton } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import axios from 'axios';
 import { useStore } from '../context/StoreContext';
@@ -117,9 +117,12 @@ const UserContent = () => {
   const { width } = useWindowDimensions();
   const isDesktop = width >= BREAKPOINT.desktop;
   const { userName } = useAuth();
-  const { stores, setSelectedStore, loadingStores } = useStore();
+  const { stores, selectedStore, setSelectedStore, loadingStores, refreshStores } = useStore();
 
   const [profile, setProfile]         = useState<UserProfile | null>(null);
+  // P-01: estado de la consulta del perfil. null = consultando.
+  const [profileStatus, setProfileStatus] = useState<'ok' | 'notFound' | 'error' | null>(null);
+  const [attempt, setAttempt]         = useState(0);
   const [explicitActive, setExplicitActive] = useState<UserScreen | null>(null);
   const [drawerOpen, setDrawerOpen]   = useState(false);
   const [ready, setReady]             = useState(false);
@@ -128,21 +131,41 @@ const UserContent = () => {
   // vez por sesión, independiente de si el tenant tiene locales o no —
   // antes esto estaba encadenado a "esperar locales", lo que ocultaba la
   // navbar entera cuando stores.length === 0 (ver incidente 07-Sep-2026).
+  // `attempt` permite reintentar desde la pantalla de bloqueo del POS (P-01).
   useEffect(() => {
     if (!userName) { setReady(true); return; }
-    axios.get(`${REACT_APP_API_URL}/api/v2/users/by-username/${userName}`)
-      .then(res => setProfile(res.data))
-      .catch(() => {})
+    setProfileStatus(null);
+    axios.get(`${REACT_APP_API_URL}/api/v2/users/by-username/${encodeURIComponent(userName)}`, { timeout: 15000 })
+      .then(res => { setProfile(res.data); setProfileStatus('ok'); })
+      // 404 = sin fila en app_users (AppUserController.findByUsername). Cualquier otro
+      // error (red, timeout, 5xx) es "no sabemos", y no se puede vender a ciegas.
+      .catch(e => setProfileStatus(e?.response?.status === 404 ? 'notFound' : 'error'))
       .finally(() => setReady(true));
-  }, [userName]);
+  }, [userName, attempt]);
 
-  // Selección de local principal — depende de que los locales del tenant
-  // hayan cargado, pero ya no bloquea el resto de la pantalla.
+  // P-01: local del cajero. Solo el que le asignó el administrador (local principal o,
+  // si no tiene, el primero activo de sus locales accesibles). NUNCA stores[0]: antes,
+  // si la consulta fallaba o no tenía local, vendía en el primer local sin verlo
+  // (el POS oculta el selector con hideStoreSelector).
+  const assignedStore = useMemo(() => {
+    if (profileStatus !== 'ok' || !profile) return null;
+    return stores.find(s => s.id === profile.storeId)
+      ?? stores.find(s => (profile.accessibleStoreIds ?? []).includes(s.id))
+      ?? null;
+  }, [profileStatus, profile, stores]);
+
   useEffect(() => {
-    if (loadingStores || !profile) return;
-    const store = stores.find(s => s.id === profile.storeId) ?? stores[0];
-    if (store) setSelectedStore(store);
-  }, [profile, stores, loadingStores]);
+    if (assignedStore && selectedStore?.id !== assignedStore.id) setSelectedStore(assignedStore);
+  }, [assignedStore, selectedStore, setSelectedStore]);
+
+  const posStoreError: string | null =
+    profileStatus === 'error'
+      ? 'No pudimos confirmar en qué local trabajás. Revisá la conexión e intentá de nuevo.'
+      : profileStatus === 'notFound' || (profileStatus === 'ok' && !loadingStores && !assignedStore)
+        ? 'Tu usuario no tiene un local activo asignado. Pedí al administrador que te asigne uno.'
+        : null;
+  const posStoreReady = !!assignedStore && selectedStore?.id === assignedStore.id;
+  const retryPosStore = () => { refreshStores(); setAttempt(a => a + 1); };
 
   const visibleMenu = visibleMenuFor(profile);
 
@@ -200,7 +223,28 @@ const UserContent = () => {
         ) : (
           <>
             {active === 'dashboard'    && <DashboardScreen />}
-            {active === 'sales'        && <POSScreen hideStoreSelector />}
+            {active === 'sales' && (
+              posStoreError ? (
+                <View style={styles.emptyState}>
+                  <MaterialCommunityIcons name="store-alert-outline" size={48} color={COLOR.warn} />
+                  <AppText variant="title" centered style={{ marginTop: SPACE.s3 }}>No se pudo abrir el punto de venta</AppText>
+                  <AppText variant="description" centered style={{ marginTop: SPACE.s2 }}>{posStoreError}</AppText>
+                  <Button
+                    mode="contained"
+                    buttonColor={COLOR.brand}
+                    textColor={COLOR.inkOnBrand}
+                    style={{ marginTop: SPACE.s4, borderRadius: RADIUS.r2 }}
+                    onPress={retryPosStore}
+                  >
+                    Reintentar
+                  </Button>
+                </View>
+              ) : posStoreReady ? (
+                <POSScreen hideStoreSelector />
+              ) : (
+                <ActivityIndicator size="large" color={COLOR.brand} style={{ flex: 1, marginTop: 60 }} />
+              )
+            )}
             {active === 'inventory'    && <InventoryScreen />}
             {active === 'salesHistory' && <SalesHistoryScreen />}
             {active === 'finance'      && <AdminScreen />}
