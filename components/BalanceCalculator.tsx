@@ -4,6 +4,7 @@ import { Button, Card, Title, Text, TextInput, IconButton } from 'react-native-p
 import { DatePickerModal } from 'react-native-paper-dates';
 import { format } from 'date-fns';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT } from '../theme';
+import { useMoney } from '../context/TenantConfigContext';
 
 interface Transaction {
   id: number;
@@ -30,6 +31,7 @@ interface BalanceState {
 const BalanceCalculator: React.FC<BalanceCalculatorProps> = ({
   visible, onDismiss, transactions, onEdit, onDelete
 }) => {
+  const money = useMoney();
   const [startDate, setStartDate]             = useState<Date | undefined>(undefined);
   const [endDate, setEndDate]                 = useState<Date | undefined>(undefined);
   const [datePickerVisible, setDatePickerVisible] = useState(false);
@@ -123,10 +125,10 @@ const BalanceCalculator: React.FC<BalanceCalculatorProps> = ({
               {startDate && endDate && (
                 <>
                   <View style={styles.balanceContainer}>
-                    <Text style={styles.balanceText}>Ingresos: L{balance.incomes.toFixed(2)}</Text>
-                    <Text style={styles.balanceText}>Egresos: L{balance.expenses.toFixed(2)}</Text>
+                    <Text style={styles.balanceText}>Ingresos: {money(balance.incomes)}</Text>
+                    <Text style={styles.balanceText}>Egresos: {money(balance.expenses)}</Text>
                     <Text style={[styles.balanceTotal, { color: balance.total >= 0 ? COLOR.income : COLOR.expense }]}>
-                      Balance Total: L{balance.total.toFixed(2)}
+                      Balance Total: {money(balance.total)}
                     </Text>
                   </View>
 
@@ -144,7 +146,7 @@ const BalanceCalculator: React.FC<BalanceCalculatorProps> = ({
                                 {transaction.type === 'income' ? '↑' : '↓'} {transaction.type}
                               </Text>
                               <Text style={styles.transactionAmount}>
-                                L{parseFloat(transaction.amount.toString()).toFixed(2)}
+                                {money(parseFloat(transaction.amount.toString()))}
                               </Text>
                             </View>
                             <Text style={styles.transactionDate}>Fecha: {formatDate(transaction.date)}</Text>

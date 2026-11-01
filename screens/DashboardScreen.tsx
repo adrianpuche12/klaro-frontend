@@ -8,7 +8,8 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, BREAKPOINT } from '../theme';
-import { formatHnl, formatTime } from '../utils/format';
+import { formatTime } from '../utils/format';
+import { useMoney } from '../context/TenantConfigContext';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,7 @@ interface DashboardData {
 // ─── DashboardScreen ──────────────────────────────────────────────────────────
 
 export default function DashboardScreen() {
+  const money = useMoney();
   const API = REACT_APP_API_URL;
   const { width } = useWindowDimensions();
   const isDesktop = width >= BREAKPOINT.desktop;
@@ -99,7 +101,7 @@ export default function DashboardScreen() {
         <KpiCard icon="store-outline"         label="Locales activos" value={String(data.stores.length)} />
         <KpiCard icon="clock-outline"         label="Turnos abiertos" value={String(data.totalActiveShifts)} highlight={data.totalActiveShifts > 0} />
         <KpiCard icon="cart-outline"          label="Ventas hoy"      value={String(data.totalSalesToday)} />
-        <KpiCard icon="cash-multiple"         label="Total del día"   value={formatHnl(data.totalAmountToday)} />
+        <KpiCard icon="cash-multiple"         label="Total del día"   value={money(data.totalAmountToday)} />
         <KpiCard icon="alert-circle-outline"  label="Alertas stock"   value={String(data.totalLowStockAlerts)} warn={data.totalLowStockAlerts > 0} />
       </View>
 
@@ -141,7 +143,7 @@ export default function DashboardScreen() {
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>{formatHnl(store.shiftSalesTotal)}</Text>
+                <Text style={styles.statValue}>{money(store.shiftSalesTotal)}</Text>
                 <Text style={styles.statLabel}>Total turno</Text>
               </View>
             </View>

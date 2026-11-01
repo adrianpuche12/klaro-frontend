@@ -2,6 +2,7 @@ import React from 'react';
 import { View, StyleSheet, useWindowDimensions, Platform } from 'react-native';
 import { Surface, Text, IconButton } from 'react-native-paper';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW, BREAKPOINT } from '../theme';
+import { useMoney } from '../context/TenantConfigContext';
 
 interface Transaction {
   id: number;
@@ -19,6 +20,7 @@ interface BalanceSummaryProps {
 }
 
 const BalanceSummary: React.FC<BalanceSummaryProps> = ({ transactions, storeName }) => {
+  const money = useMoney();
   const { width } = useWindowDimensions();
   const isMobile = width < BREAKPOINT.desktop;
 
@@ -52,7 +54,7 @@ const BalanceSummary: React.FC<BalanceSummaryProps> = ({ transactions, storeName
             <IconButton icon="trending-up" size={16} iconColor={COLOR.income} style={styles.icon} />
             <Text style={styles.label}>Ingresos</Text>
             <Text style={styles.incomeValue}>
-              L{balance.incomes.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+              {money(balance.incomes)}
             </Text>
           </View>
 
@@ -60,7 +62,7 @@ const BalanceSummary: React.FC<BalanceSummaryProps> = ({ transactions, storeName
             <IconButton icon="trending-down" size={16} iconColor={COLOR.expense} style={styles.icon} />
             <Text style={styles.label}>Egresos</Text>
             <Text style={styles.expenseValue}>
-              L{balance.expenses.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+              {money(balance.expenses)}
             </Text>
           </View>
 
@@ -73,7 +75,7 @@ const BalanceSummary: React.FC<BalanceSummaryProps> = ({ transactions, storeName
             />
             <Text style={[styles.label, styles.totalLabel]}>Total</Text>
             <Text style={[styles.totalValue, { color: balance.total >= 0 ? COLOR.income : COLOR.expense }]}>
-              L{balance.total.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+              {money(balance.total)}
             </Text>
           </View>
         </View>

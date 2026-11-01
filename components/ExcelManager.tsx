@@ -388,15 +388,15 @@ const ExcelManager: React.FC<ExcelManagerProps> = ({
                   {/* Fila Local */}
                   <View style={styles.tableRow}>
                     <Text style={styles.tableCell}>Local</Text>
-                    <Text style={styles.tableCell}>Texto: "Danli" o "El Paraiso"</Text>
-                    <Text style={styles.tableCell}>Danli</Text>
+                    <Text style={styles.tableCell}>Texto: nombre del local tal como figura en el sistema</Text>
+                    <Text style={styles.tableCell}>Sucursal Centro</Text>
                   </View>
                   
                   {/* Nueva fila para Proveedor */}
                   <View style={styles.tableRow}>
                     <Text style={styles.tableCell}>Proveedor</Text>
                     <Text style={styles.tableCell}>Texto (opcional, para tipo Proveedor)</Text>
-                    <Text style={styles.tableCell}>Pollo Rey</Text>
+                    <Text style={styles.tableCell}>Distribuidora Ejemplo</Text>
                   </View>
                   
                   {/* Nueva fila para CierresCantidad */}

@@ -4,6 +4,7 @@ import * as Sentry from '@sentry/react';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { StoreProvider } from '../context/StoreContext';
 import { UIPreferencesProvider } from '../context/UIPreferencesContext';
+import { TenantConfigProvider } from '../context/TenantConfigContext';
 
 Sentry.init({
   dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
@@ -65,7 +66,9 @@ export default function RootLayout() {
     <AuthProvider>
       <UIPreferencesProvider>
         <StoreProvider>
-          <RootLayoutNav />
+          <TenantConfigProvider>
+            <RootLayoutNav />
+          </TenantConfigProvider>
         </StoreProvider>
       </UIPreferencesProvider>
     </AuthProvider>

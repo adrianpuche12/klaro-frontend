@@ -12,8 +12,9 @@ import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
-import { formatHnl } from '../utils/format';
 import { stockColor } from '../utils/stockStatus';
+import { useMoney } from '../context/TenantConfigContext';
+import { APP_LOCALE } from '../utils/format';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -52,6 +53,7 @@ const flatCats = (cats: Category[]): Category[] => {
 // ─── POSScreen ────────────────────────────────────────────────────────────────
 
 export default function POSScreen({ hideStoreSelector = false }: { hideStoreSelector?: boolean }) {
+  const money = useMoney();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
 
@@ -320,7 +322,7 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
           <View style={styles.modal}>
             <Text style={styles.modalTitle}>Abrir turno</Text>
             <Text style={styles.modalSub}>Local: <Text style={{ fontWeight: '900' }}>{selectedStore?.name ?? '—'}</Text></Text>
-            <Text style={styles.modalSub}>Empleada: <Text style={{ fontWeight: '900' }}>{userName ?? '—'}</Text></Text>
+            <Text style={styles.modalSub}>Atendió: <Text style={{ fontWeight: '900' }}>{userName ?? '—'}</Text></Text>
             <View style={styles.modalActions}>
               <Button mode="outlined" onPress={() => setOpenShiftModal(false)} style={{ flex: 1 }}>Cancelar</Button>
               <Button mode="contained" onPress={handleOpenShift} buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ flex: 1 }}>Confirmar</Button>
@@ -372,7 +374,7 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
         <View style={styles.kpiDivider} />
         <View style={styles.kpiItem}>
           <Text style={styles.kpiLabel}>Total acumulado</Text>
-          <Text style={styles.kpiValue}>{formatHnl(kpiTotal)}</Text>
+          <Text style={styles.kpiValue}>{money(kpiTotal)}</Text>
         </View>
         <View style={styles.kpiDivider} />
         <View style={styles.kpiItem}>
@@ -465,7 +467,7 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
                           <Text style={styles.pcName} numberOfLines={2}>{item.productName}</Text>
                           {item.productSku ? <Text style={styles.pcCode}>{item.productSku}</Text> : null}
                         </View>
-                        <Text style={styles.pcPrice}>{formatHnl(item.price)}</Text>
+                        <Text style={styles.pcPrice}>{money(item.price)}</Text>
                       </View>
 
                       {/* Fila 2: stock */}
@@ -531,7 +533,7 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
                       {shiftSales.length} venta{shiftSales.length !== 1 ? 's' : ''}
                     </Text>
                     <Text style={styles.salesSummaryTotal}>
-                      {formatHnl(shiftSales.reduce((s, v) => s + v.total, 0))}
+                      {money(shiftSales.reduce((s, v) => s + v.total, 0))}
                     </Text>
                   </View>
 
@@ -541,9 +543,9 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
                       {/* Header de la venta */}
                       <View style={styles.saleCardHead}>
                         <Text style={styles.saleCardTime}>
-                          {new Date(sale.createdAt).toLocaleTimeString('es-HN', { hour: '2-digit', minute: '2-digit' })}
+                          {new Date(sale.createdAt).toLocaleTimeString(APP_LOCALE, { hour: '2-digit', minute: '2-digit' })}
                         </Text>
-                        <Text style={styles.saleCardTotal}>{formatHnl(sale.total)}</Text>
+                        <Text style={styles.saleCardTotal}>{money(sale.total)}</Text>
                         <TouchableOpacity
                           style={[styles.cancelBtn, cancellingId === sale.id && { opacity: 0.5 }]}
                           onPress={() => handleCancelSale(sale.id)}
@@ -559,13 +561,13 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
                       <View style={styles.saleCardItems}>
                         {sale.items.map(item => (
                           <Text key={item.id} style={styles.saleCardItem} numberOfLines={1}>
-                            · {item.productName} × {item.quantity}  <Text style={{ color: COLOR.ink2 }}>{formatHnl(item.subtotal)}</Text>
+                            · {item.productName} × {item.quantity}  <Text style={{ color: COLOR.ink2 }}>{money(item.subtotal)}</Text>
                           </Text>
                         ))}
                       </View>
 
                       <View style={styles.saleCardFooter}>
-                        <Text style={styles.saleCardFooterText}>Total: {formatHnl(sale.total)}</Text>
+                        <Text style={styles.saleCardFooterText}>Total: {money(sale.total)}</Text>
                       </View>
                     </View>
                   ))}
@@ -604,17 +606,17 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
                     <View key={i} style={styles.sumRow}>
                       <Text style={[styles.sumCell, { flex: 1 }]} numberOfLines={1}>{p.productName}</Text>
                       <Text style={[styles.sumCell, { width: 46, textAlign: 'center' }]}>{p.quantity}</Text>
-                      <Text style={[styles.sumCell, { width: 88, textAlign: 'right' }]}>{formatHnl(p.subtotal)}</Text>
+                      <Text style={[styles.sumCell, { width: 88, textAlign: 'right' }]}>{money(p.subtotal)}</Text>
                     </View>
                   ))}
                 </ScrollView>
 
                 <View style={styles.sumDivider} />
                 <View style={{ gap: 4 }}>
-                  <View style={styles.sumTotalRow}><Text style={styles.sumLabel}>Subtotal</Text><Text style={styles.sumValue}>{formatHnl(summary.totalSubtotal)}</Text></View>
+                  <View style={styles.sumTotalRow}><Text style={styles.sumLabel}>Subtotal</Text><Text style={styles.sumValue}>{money(summary.totalSubtotal)}</Text></View>
                   <View style={[styles.sumTotalRow, { borderTopWidth: 2, borderTopColor: COLOR.ink, marginTop: 6, paddingTop: 6 }]}>
                     <Text style={{ fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.black as any, color: COLOR.ink }}>Total del día</Text>
-                    <Text style={{ fontSize: FONT_SIZE.h2, fontWeight: FONT_WEIGHT.black as any, color: COLOR.ink }}>{formatHnl(summary.totalAmount)}</Text>
+                    <Text style={{ fontSize: FONT_SIZE.h2, fontWeight: FONT_WEIGHT.black as any, color: COLOR.ink }}>{money(summary.totalAmount)}</Text>
                   </View>
                   <Text style={{ fontSize: FONT_SIZE.caption, color: COLOR.ink2, marginTop: 4 }}>{summary.totalSales} venta{summary.totalSales !== 1 ? 's' : ''} registrada{summary.totalSales !== 1 ? 's' : ''}</Text>
                 </View>
@@ -656,6 +658,7 @@ function Ticket({ cart, subtotal, isv, total, itemCount, onRemove, onClear, onSu
   submitting: boolean;
   full: boolean;
 }) {
+  const money = useMoney();
   return (
     <View style={tkStyles.root}>
       <View style={tkStyles.head}>
@@ -671,9 +674,9 @@ function Ticket({ cart, subtotal, isv, total, itemCount, onRemove, onClear, onSu
                 <View key={item.productId} style={tkStyles.item}>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={tkStyles.itemName} numberOfLines={1}>{item.productName}</Text>
-                    <Text style={tkStyles.itemCode}>{item.qty} × {formatHnl(item.price)}</Text>
+                    <Text style={tkStyles.itemCode}>{item.qty} × {money(item.price)}</Text>
                   </View>
-                  <Text style={tkStyles.itemSub}>{formatHnl(item.subtotal)}</Text>
+                  <Text style={tkStyles.itemSub}>{money(item.subtotal)}</Text>
                   <TouchableOpacity onPress={() => onRemove(item.productId)} style={tkStyles.deleteBtn} accessibilityRole="button" accessibilityLabel="Quitar del carrito">
                     <MaterialCommunityIcons name="trash-can-outline" size={18} color={COLOR.expense} />
                   </TouchableOpacity>
@@ -684,10 +687,10 @@ function Ticket({ cart, subtotal, isv, total, itemCount, onRemove, onClear, onSu
 
       {/* Totales */}
       <View style={tkStyles.totals}>
-        <View style={tkStyles.totalLine}><Text style={tkStyles.totalLabel}>Subtotal</Text><Text style={tkStyles.totalValue}>{formatHnl(subtotal)}</Text></View>
+        <View style={tkStyles.totalLine}><Text style={tkStyles.totalLabel}>Subtotal</Text><Text style={tkStyles.totalValue}>{money(subtotal)}</Text></View>
         <View style={[tkStyles.totalLine, tkStyles.totalFinal]}>
           <Text style={tkStyles.totalLabelFinal}>TOTAL</Text>
-          <Text style={tkStyles.totalAmount}>{formatHnl(total)}</Text>
+          <Text style={tkStyles.totalAmount}>{money(total)}</Text>
         </View>
       </View>
 

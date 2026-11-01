@@ -5,10 +5,11 @@ import {
 } from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../theme';
-import { formatHnl, formatDate, formatTime } from '../utils/format';
+import { formatDate, formatTime } from '../utils/format';
 import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
 import { useStore } from '../context/StoreContext';
+import { useMoney } from '../context/TenantConfigContext';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,7 @@ interface ShiftSummary {
 // ─── SalesHistoryScreen ───────────────────────────────────────────────────────
 
 export default function SalesHistoryScreen() {
+  const money = useMoney();
   const API = REACT_APP_API_URL;
   const { stores, selectedStore, setSelectedStore } = useStore();
 
@@ -203,7 +205,7 @@ export default function SalesHistoryScreen() {
                           <View key={i} style={styles.detailRow}>
                             <Text style={[styles.detailCell, styles.detailColName]} numberOfLines={1}>{p.productName}</Text>
                             <Text style={[styles.detailCell, { width: 44, textAlign: 'center' }]}>{p.quantity}</Text>
-                            <Text style={[styles.detailCell, { width: 88, textAlign: 'right' }]}>{formatHnl(p.subtotal)}</Text>
+                            <Text style={[styles.detailCell, { width: 88, textAlign: 'right' }]}>{money(p.subtotal)}</Text>
                           </View>
                         ))}
 
@@ -211,11 +213,11 @@ export default function SalesHistoryScreen() {
                         <View style={styles.detailTotals}>
                           <View style={styles.totalLine}>
                             <Text style={styles.totalLabel}>{summary.totalSales} venta{summary.totalSales !== 1 ? 's' : ''}</Text>
-                            <Text style={styles.totalLabel}>Subtotal: {formatHnl(summary.totalSubtotal)}</Text>
+                            <Text style={styles.totalLabel}>Subtotal: {money(summary.totalSubtotal)}</Text>
                           </View>
                           <View style={[styles.totalLine, styles.totalFinal]}>
                             <Text style={styles.totalFinalLabel}>TOTAL</Text>
-                            <Text style={styles.totalFinalAmount}>{formatHnl(summary.totalAmount)}</Text>
+                            <Text style={styles.totalFinalAmount}>{money(summary.totalAmount)}</Text>
                           </View>
                         </View>
                       </>

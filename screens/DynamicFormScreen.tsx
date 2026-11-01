@@ -19,7 +19,8 @@ import {
   Card,
   Title,
   Avatar,
-  HelperText
+  HelperText,
+  Chip,
 } from 'react-native-paper';
 import { DatePickerModal } from 'react-native-paper-dates';
 import { format } from 'date-fns';
@@ -27,18 +28,21 @@ import ResponsiveButton from '../components/ui/responsiveButton';
 import { REACT_APP_API_URL } from '../config';
 import StoreSelector from '../components/StoreSelector';
 import { useAuth } from '../context/AuthContext';
-import { formatHnl, formatDate } from '../utils/format';
+import { formatDate } from '../utils/format';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { formatAmountInput, parseFormattedNumber } from '../utils/numberFormat';
 import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../theme';
 import { ImageService } from '../utils/ImageService';
 import ImagePicker from '../components/ImagePicker';
+import { useMoney } from '../context/TenantConfigContext';
 
 const BACKEND_URL = `${REACT_APP_API_URL}/api/forms`;
 const TRANSACTIONS_URL = `${REACT_APP_API_URL}/transactions`;
 
 const DynamicFormScreen = () => {
   const { userName, accessToken } = useAuth();
+  const money = useMoney();
+  const [knownSuppliers, setKnownSuppliers] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'form' | 'historial'>('form');
 
   // ── Historial de operaciones del usuario ────────────────────────────────────
@@ -146,6 +150,22 @@ const DynamicFormScreen = () => {
   useEffect(() => {
     setFormData(prevData => ({ ...prevData, date: getCurrentFormattedDate() }));
   }, []);
+
+  // Proveedores que esta empresa ya usó (para sugerir). Si el usuario no tiene permiso de operaciones, queda vacío.
+  useEffect(() => {
+    if (formType !== 'supplier-payments') return;
+    const end = new Date();
+    const start = new Date(end.getFullYear() - 1, end.getMonth(), end.getDate());
+    const iso = (d: Date) => format(d, 'yyyy-MM-dd');
+    fetch(`${BACKEND_URL}/supplier-payments?startDate=${iso(start)}&endDate=${iso(end)}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then(r => (r.ok ? r.json() : []))
+      .then((rows: { supplier?: string | null }[]) => {
+        const names = Array.from(new Set(rows.map(r => (r.supplier ?? '').trim()).filter(Boolean)));
+        setKnownSuppliers(names.sort((a, b) => a.localeCompare(b)));
+      })
+      .catch(() => setKnownSuppliers([]));
+  }, [formType, accessToken]);
 
   // Cargar locales activos y distribuir el porcentaje en partes iguales
   useEffect(() => {
@@ -291,6 +311,11 @@ const DynamicFormScreen = () => {
       newErrors.type = true;
     }
 
+    // Validación para pagos a proveedores
+    if (formType === 'supplier-payments' && !formData.supplier.trim()) {
+      newErrors.supplier = true;
+    }
+
     // Validación para gastos administrativos
     if (formType === 'gasto-admin') {
       if (!formData.amount || parseFloat(formData.amount.replace(/,/g, '')) <= 0) newErrors.amount = true;
@@ -414,25 +439,34 @@ const DynamicFormScreen = () => {
     />
   );
 
-  const renderSupplierList = () => {
-    const suppliers = ['Pollo Rey', 'Pollo Cortijo', 'Pago a Proveedor de Frescos'];
-    return (
-      <View style={styles.supplierListContainer}>
-        {suppliers.map((supplier) => (
-          <RadioButton.Item
-            key={supplier}
-            label={supplier}
-            value={supplier}
-            status={formData.supplier === supplier ? 'checked' : 'unchecked'}
-            onPress={() => handleInputChange('supplier', supplier)}
-            style={styles.radioItem}
-            labelStyle={styles.radioLabel}
-            color={COLOR.brandDark}
-          />
-        ))}
-      </View>
-    );
-  };
+  // Proveedores: texto libre de cada empresa. Se sugieren los que ya usó (últimos 12 meses), nunca una lista fija.
+  const supplierSuggestions = knownSuppliers
+    .filter(name => name.toLowerCase().includes(formData.supplier.trim().toLowerCase()) && name !== formData.supplier)
+    .slice(0, 8);
+
+  const renderSupplierList = () => (
+    <View style={styles.supplierListContainer}>
+      <TextInput
+        label="Proveedor"
+        value={formData.supplier}
+        onChangeText={(text) => handleInputChange('supplier', text)}
+        mode="outlined"
+        style={styles.input}
+        error={errors.supplier}
+        left={<TextInput.Icon icon="truck-outline" color={COLOR.brandDark} />}
+      />
+      {errors.supplier && <HelperText type="error" visible>Indicá el proveedor</HelperText>}
+      {supplierSuggestions.length > 0 && (
+        <View style={styles.supplierChips}>
+          {supplierSuggestions.map(name => (
+            <Chip key={name} compact style={styles.supplierChip} onPress={() => handleInputChange('supplier', name)}>
+              {name}
+            </Chip>
+          ))}
+        </View>
+      )}
+    </View>
+  );
 
   const renderTransactionForm = () => (
     <>
@@ -616,7 +650,7 @@ const DynamicFormScreen = () => {
               </View>
               {montoNum > 0 && (
                 <Text style={styles.localAmount}>
-                  L {((montoNum * d.porcentaje) / 100).toFixed(2)}
+                  {money((montoNum * d.porcentaje) / 100)}
                 </Text>
               )}
             </View>
@@ -642,7 +676,7 @@ const DynamicFormScreen = () => {
             </Text>
             {distribuciones.map(d => (
               <Text key={d.storeId} style={styles.summaryText}>
-                • {d.nombre} ({d.porcentaje}%): L {((montoNum * d.porcentaje) / 100).toFixed(2)}
+                • {d.nombre} ({d.porcentaje}%): {money((montoNum * d.porcentaje) / 100)}
               </Text>
             ))}
           </View>
@@ -750,7 +784,7 @@ const DynamicFormScreen = () => {
       case 'supplier-payments':
         return (
           <>
-            <Title style={styles.formSectionTitle}>Selecciona un proveedor</Title>
+            <Title style={styles.formSectionTitle}>Proveedor</Title>
             {renderSupplierList()}
 
             <StoreSelector
@@ -922,7 +956,7 @@ const DynamicFormScreen = () => {
               <Text style={histStyles.date}>{op.date ? formatDate(op.date) : ''}</Text>
             </View>
             <Text style={[histStyles.amount, { color: isIncome ? COLOR.income : COLOR.expense }]}>
-              {isIncome ? '+' : '-'}{formatHnl(op.amount)}
+              {isIncome ? '+' : '-'}{money(op.amount)}
             </Text>
           </View>
         </View>
@@ -1152,6 +1186,15 @@ const styles = StyleSheet.create({
   },
   supplierListContainer: {
     marginBottom: SPACE.s4,
+  },
+  supplierChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: SPACE.s2,
+  },
+  supplierChip: {
+    marginRight: SPACE.s2,
+    marginBottom: SPACE.s2,
   },
   inputContainer: {
     marginBottom: SPACE.s3,
