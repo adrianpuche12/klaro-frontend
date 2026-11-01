@@ -14,7 +14,7 @@ Sentry.init({
 });
 
 
-type ValidSegment = 'login' | 'admin' | 'index' | '(tabs)' | '+not-found';
+type ValidSegment = 'login' | 'admin' | 'plataforma' | 'index' | '(tabs)' | '+not-found';
 
 function RootLayoutNav() {
   const { isAuthenticated, roles, canManageUsers, loading } = useAuth();
@@ -33,6 +33,12 @@ function RootLayoutNav() {
     const handleNavigation = () => {
       if (!isAuthenticated) {
         if (currentSegment !== 'login') router.replace('/login');
+      } else if (roles.includes('platform')) {
+        // SPRINT-16: el administrador de plataforma solo tiene la pantalla de Empresas.
+        if (currentSegment !== 'plataforma') router.replace('/plataforma');
+      } else if (currentSegment === 'plataforma') {
+        // Ningún usuario de empresa entra a la pantalla de plataforma.
+        router.replace(roles.includes('root') || canManageUsers ? '/admin' : '/');
       } else {
         // Keycloak ya no distingue admin/user (todos "staff", SPRINT-14) --
         // canManageUsers viene del Role asignado en la app. root siempre true.

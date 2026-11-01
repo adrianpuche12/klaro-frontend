@@ -57,6 +57,22 @@ interface AuthContextType extends AuthState {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+/**
+ * Rol de la app a partir del JWT.
+ * - "platform": administrador de plataforma de Nilo (SPRINT-16). Exige el rol de Keycloak
+ *   "platform" Y tenant_id = 0, igual que PlatformSecurity en el backend. No tiene empresa:
+ *   no ve ni opera datos de negocio, solo la pantalla de Empresas.
+ * - "root": dueño de una empresa.
+ * - "staff": todo lo demás (los permisos finos vienen del Role de la app).
+ */
+export function resolveAppRoles(decodedToken: any): string[] {
+  const userRoles: string[] = decodedToken?.realm_access?.roles || [];
+  const tenantId = Number(decodedToken?.tenant_id);
+  if (userRoles.includes('platform') && tenantId === 0) return ['platform'];
+  if (userRoles.includes('root')) return ['root'];
+  return ['staff'];
+}
+
 const Storage = {
   async setItem(key: string, value: string): Promise<void> {
     try {
@@ -229,11 +245,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const { access_token, refresh_token, expires_in } = response.data;
       const decodedToken = jwtDecode<any>(access_token);
-      const userRoles = decodedToken.realm_access?.roles || [];
-      const isRoot  = userRoles.includes('root');
+      const appRoles = resolveAppRoles(decodedToken);
+      const isRoot = appRoles.includes('root');
+      const isPlatform = appRoles.includes('platform');
       const userName = decodedToken.preferred_username;
       const userId = decodedToken.sub;
-      const appRoles = isRoot ? ['root'] : ['staff'];
       // canManageUsers/permissions no se recalculan en cada refresh (evita una
       // llamada extra cada ~pocos minutos) -- se mantiene el último valor
       // conocido, refrescado recién en el próximo login completo. Root siempre
@@ -242,8 +258,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // ANTES de que el setAuthState() del login que lo programó se aplique --
       // leer authState acá daría el valor previo al login (bug real encontrado
       // en testing E2E, ver comentario en la declaración de los refs).
-      const canManageUsers = isRoot ? true : canManageUsersRef.current;
-      const permissions    = isRoot ? null : permissionsRef.current;
+      const canManageUsers = isRoot ? true : isPlatform ? false : canManageUsersRef.current;
+      const permissions    = isRoot ? null : isPlatform ? [] : permissionsRef.current;
 
       await Storage.multiSet([
         ['accessToken', access_token],
@@ -305,19 +321,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { access_token, refresh_token, expires_in } = response.data;
       const decodedToken = jwtDecode<any>(access_token);
 
-      const userRoles = decodedToken.realm_access?.roles || [];
-      const isRoot  = userRoles.includes('root');
       const userName = decodedToken.preferred_username;
       const userId = decodedToken.sub;
       // SPRINT-14: Keycloak colapsó admin/user -> "staff". root sigue siendo
       // un rol real de Keycloak; todo lo demás es "staff" y la granularidad
       // (canManageUsers) viene del Role asignado en la app, no del JWT.
-      const appRoles = isRoot ? ['root'] : ['staff'];
+      // SPRINT-16: "platform" (tenant 0) no tiene empresa ni perfil en app_users.
+      const appRoles = resolveAppRoles(decodedToken);
+      const isRoot = appRoles.includes('root');
+      const isPlatform = appRoles.includes('platform');
 
       setAxiosAuthHeader(access_token); // necesario antes de poder llamar a /by-username
       const { canManageUsers, permissions } = isRoot
         ? { canManageUsers: true, permissions: null }
-        : await fetchProfileAccess(userName);
+        : isPlatform
+          ? { canManageUsers: false, permissions: [] as string[] }
+          : await fetchProfileAccess(userName);
 
       await Storage.multiSet([
         ['accessToken', access_token],
