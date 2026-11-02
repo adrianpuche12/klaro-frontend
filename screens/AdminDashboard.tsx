@@ -12,6 +12,7 @@ import StoresScreen from './StoresScreen';
 import InventoryScreen from './InventoryScreen';
 import POSScreen from './POSScreen';
 import SalesHistoryScreen from './SalesHistoryScreen';
+import ReportsScreen from './ReportsScreen';
 import DashboardScreen from './DashboardScreen';
 import UsersScreen from './UsersScreen';
 import RolesScreen from './RolesScreen';
@@ -95,6 +96,7 @@ const AdminDashboard = () => {
           {activeScreen === 'stores'       && <StoresScreen />}
           {activeScreen === 'sales'        && <POSScreen />}
           {activeScreen === 'salesHistory' && <SalesHistoryScreen />}
+          {activeScreen === 'reports'      && <ReportsScreen />}
           {activeScreen === 'tenantConfig' && <TenantConfigScreen />}
         </View>
 

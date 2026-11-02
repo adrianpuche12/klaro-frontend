@@ -10,7 +10,7 @@
  */
 export type SidebarScreen =
   | 'dashboard' | 'operations' | 'finance' | 'inventory' | 'stores'
-  | 'sales' | 'salesHistory' | 'users' | 'roles' | 'tenantConfig';
+  | 'sales' | 'salesHistory' | 'reports' | 'users' | 'roles' | 'tenantConfig';
 
 export interface MenuItem { key: SidebarScreen; label: string; icon: string }
 
@@ -30,6 +30,8 @@ const MODULE_MAP: Partial<Record<SidebarScreen, string[]>> = {
   dashboard:    ['DASHBOARD'],
   sales:        ['POS'],
   salesHistory: ['SALES_HISTORY'],
+  // Informes: ventas (SALES_HISTORY) u operaciones (OPERATIONS); la pantalla muestra solo los permitidos.
+  reports:      ['SALES_HISTORY', 'OPERATIONS'],
   inventory:    ['INVENTORY', 'CATALOG'],
   finance:      ['TRANSACTIONS', 'SALARY_PAYMENTS', 'SUPPLIER_PAYMENTS'],
   operations:   ['OPERATIONS'],
@@ -51,6 +53,7 @@ export const MENU_ROOT: MenuItem[] = [
   { key: 'dashboard',    label: 'Dashboard',        icon: 'view-dashboard-outline' },
   { key: 'sales',        label: 'Ventas',           icon: 'cart-outline' },
   { key: 'salesHistory', label: 'Historial ventas', icon: 'receipt' },
+  { key: 'reports',      label: 'Informes',         icon: 'file-chart-outline' },
   { key: 'inventory',    label: 'Inventario',       icon: 'package-variant' },
   { key: 'finance',      label: 'Finanzas',         icon: 'cash-multiple' },
   { key: 'operations',   label: 'Operaciones',      icon: 'clipboard-text-outline' },
@@ -94,6 +97,7 @@ export const SCREEN_TITLE: Record<SidebarScreen, string> = {
   inventory:    'Inventario',
   stores:       'Locales',
   salesHistory: 'Historial ventas',
+  reports:      'Informes',
   users:        'Usuarios',
   roles:        'Roles',
   sales:        'Ventas',

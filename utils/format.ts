@@ -81,6 +81,9 @@ const dayKey = (d: Date): string => {
   return `${get('year')}-${get('month')}-${get('day')}`;
 };
 
+/** Fecha de HOY de la empresa como "yyyy-mm-dd" (para filtros de informes y rangos). */
+export const companyToday = (): string => dayKey(new Date());
+
 /** ¿El instante cae HOY en la zona de la empresa? */
 export const isTodayInCompany = (iso: string): boolean => dayKey(new Date(iso)) === dayKey(new Date());
 
