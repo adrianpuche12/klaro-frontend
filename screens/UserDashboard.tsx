@@ -15,11 +15,12 @@ import AppText from '../components/ui/AppText';
 import POSScreen from './POSScreen';
 import InventoryScreen from './InventoryScreen';
 import SalesHistoryScreen from './SalesHistoryScreen';
+import ReportsScreen from './ReportsScreen';
 import DynamicFormScreen from './DynamicFormScreen';
 import DashboardScreen from './DashboardScreen';
 import AdminScreen from './AdminScreen';
 
-type UserScreen = 'dashboard' | 'sales' | 'inventory' | 'salesHistory' | 'finance' | 'operaciones';
+type UserScreen = 'dashboard' | 'sales' | 'inventory' | 'salesHistory' | 'reports' | 'finance' | 'operaciones';
 
 // Mapea cada item de menú al/los módulo(s) de permisos que lo habilitan
 // (SPRINT-09/SPRINT-14). Mismo catálogo que PermissionModule en el backend /
@@ -32,6 +33,7 @@ const MENU: { key: UserScreen; label: string; icon: string; modules: string[] }[
   { key: 'sales',        label: 'Ventas',      icon: 'cart-outline',              modules: ['POS'] },
   { key: 'inventory',    label: 'Inventario',  icon: 'package-variant',           modules: ['INVENTORY', 'CATALOG'] },
   { key: 'salesHistory', label: 'Mis ventas',  icon: 'receipt',      modules: ['SALES_HISTORY'] },
+  { key: 'reports',      label: 'Informes',    icon: 'file-chart-outline',        modules: ['SALES_HISTORY', 'OPERATIONS'] },
   { key: 'finance',      label: 'Finanzas',    icon: 'cash-multiple',             modules: ['TRANSACTIONS', 'SALARY_PAYMENTS', 'SUPPLIER_PAYMENTS'] },
   { key: 'operaciones',  label: 'Operaciones', icon: 'clipboard-text-outline',    modules: ['OPERATIONS'] },
 ];
@@ -309,6 +311,7 @@ const UserContent = () => {
             )}
             {active === 'inventory'    && <InventoryScreen />}
             {active === 'salesHistory' && <SalesHistoryScreen mine store={assignedStore} />}
+            {active === 'reports'      && <ReportsScreen store={assignedStore} />}
             {active === 'finance'      && <AdminScreen />}
             {active === 'operaciones'  && <DynamicFormScreen />}
           </>
