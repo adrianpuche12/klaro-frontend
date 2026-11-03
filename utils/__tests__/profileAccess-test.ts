@@ -42,10 +42,11 @@ describe('fetchProfileAccess — falla cerrada', () => {
     expect(await fetchProfileAccess(API, 'caja1', getResolving('<!doctype html>'))).toEqual(NO_ACCESS);
   });
 
-  it('404 sin cuerpo = sin fila en app_users → legacy confirmado por el servidor (igual que el backend)', async () => {
+  it('404 sin cuerpo = sin fila en app_users → sin permisos, sin pantalla de error (P6 fail-closed, igual que backend#31)', async () => {
     const a = await fetchProfileAccess(API, 'viejo', getRejecting(axiosError(404, '')));
     expect(a.status).toBe('ok');
-    expect(a.fullAccess).toBe(true);
+    expect(a.fullAccess).toBe(false);
+    expect(a.permissions).toEqual([]);
   });
 
   it('codifica el usuario en la URL', async () => {

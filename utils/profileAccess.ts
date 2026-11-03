@@ -52,7 +52,10 @@ export const ROOT_ACCESS: ProfileAccess = {
 /** Administrador de plataforma (SPRINT-16): sin empresa, sin módulos ni locales. */
 export const PLATFORM_ACCESS: ProfileAccess = { ...NO_ACCESS, status: 'ok' };
 
-/** Legacy confirmado por el servidor (ver isLegacy en PermissionGuard). */
+/** Sin fila en app_users: el servidor respondió bien, pero el usuario no tiene permisos (P6, fail-closed). */
+export const NO_PROFILE_ROW_ACCESS: ProfileAccess = { ...NO_ACCESS, status: 'ok' };
+
+/** Fila sin Role ni locales (cuenta "sin Role" que solo crea root): el backend le sigue dando acceso total. */
 const LEGACY_ACCESS: ProfileAccess = {
   status: 'ok',
   canManageUsers: false,
@@ -118,7 +121,8 @@ export async function fetchProfileAccess(
     const res = await get(`${apiUrl}/api/v2/users/by-username/${encodeURIComponent(username)}`, { timeout: 15000 });
     return accessFromProfile(res.data);
   } catch (e) {
-    return isNoProfileRow(e) ? LEGACY_ACCESS : NO_ACCESS;
+    // Sin fila en app_users = sin acceso (backend#31 cierra P6). Root no llega acá: sale del token.
+    return isNoProfileRow(e) ? NO_PROFILE_ROW_ACCESS : NO_ACCESS;
   }
 }
 
