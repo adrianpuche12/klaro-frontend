@@ -8,6 +8,7 @@ import { UIPreferencesProvider } from '../context/UIPreferencesContext';
 import { TenantConfigProvider } from '../context/TenantConfigContext';
 import { SplashScreen } from '../components/SplashScreen';
 import { AccessErrorScreen } from '../components/AccessErrorScreen';
+import { PaperProvider } from 'react-native-paper';
 import { isPrivileged } from '../config/navConfig';
 
 // K-09: @sentry/react es el SDK de navegador (browserTracingIntegration). En iOS/Android
@@ -73,6 +74,10 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   return (
+    // react-native-paper exige su Provider en la raíz: sin él, cualquier <Portal> (p. ej. en
+    // Operaciones, DynamicFormScreen) tira "forgot to wrap your root component" y deja la
+    // app en blanco. Tema por defecto = el mismo que usaban los componentes sin Provider.
+    <PaperProvider>
     <AuthProvider>
       <UIPreferencesProvider>
         <StoreProvider>
@@ -82,5 +87,6 @@ export default function RootLayout() {
         </StoreProvider>
       </UIPreferencesProvider>
     </AuthProvider>
+    </PaperProvider>
   );
 }
