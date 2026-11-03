@@ -40,6 +40,7 @@ import ImagePicker from '../components/ImagePicker';
 import { useMoney } from '../context/TenantConfigContext';
 import { apiErrorMessage, isForbidden, httpStatus, NO_PERMISSION_MESSAGE } from '../utils/apiError';
 import { fetchStoreAssignment, resolveAssignedStore, type StoreAssignment } from '../utils/assignedStore';
+import { filterAllowedStores } from '../utils/profileAccess';
 
 const BACKEND_URL = `${REACT_APP_API_URL}/api/forms`;
 const TRANSACTIONS_URL = `${REACT_APP_API_URL}/transactions`;
@@ -69,7 +70,7 @@ const FORM_TYPE_OPTIONS: { value: FormType; label: string }[] = [
 const CASHIER_FORM_TYPES: FormType[] = ['closing-deposits'];
 
 const DynamicFormScreen = () => {
-  const { userName, roles, canManageUsers } = useAuth();
+  const { userName, roles, canManageUsers, fullAccess, allowedStoreIds } = useAuth();
   const isCashier = !isPrivileged({ roles, canManageUsers });
   const { stores, loadingStores, refreshStores } = useStore();
   const money = useMoney();
@@ -258,7 +259,8 @@ const DynamicFormScreen = () => {
     setDistribStatus('loading');
     axios.get<{ id: number; name: string }[]>(`${REACT_APP_API_URL}/api/v2/stores/active`, { timeout: API_TIMEOUT })
       .then(({ data }) => {
-        const active = Array.isArray(data) ? data : [];
+        // P10: solo los locales permitidos para el usuario (root/legacy: todos).
+        const active = filterAllowedStores(Array.isArray(data) ? data : [], { fullAccess, allowedStoreIds });
         const base     = active.length ? Math.floor(100 / active.length) : 0;
         const resto    = 100 - base * active.length;
         setDistribuciones(active.map((s, i) => ({

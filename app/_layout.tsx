@@ -7,6 +7,7 @@ import { StoreProvider } from '../context/StoreContext';
 import { UIPreferencesProvider } from '../context/UIPreferencesContext';
 import { TenantConfigProvider } from '../context/TenantConfigContext';
 import { SplashScreen } from '../components/SplashScreen';
+import { AccessErrorScreen } from '../components/AccessErrorScreen';
 import { isPrivileged } from '../config/navConfig';
 
 // K-09: @sentry/react es el SDK de navegador (browserTracingIntegration). En iOS/Android
@@ -22,15 +23,20 @@ if (Platform.OS === 'web' && process.env.EXPO_PUBLIC_SENTRY_DSN) {
 }
 
 function RootLayoutNav() {
-  const { isAuthenticated, roles, canManageUsers, loading } = useAuth();
+  const { isAuthenticated, roles, canManageUsers, loading, accessStatus, reloadAccess, logout } = useAuth();
   const segments = useSegments() as string[];
   const navigationState = useRootNavigationState();
+  // Falla cerrada: sesión abierta pero sin perfil de acceso cargado (o reintentando).
+  const accessBlocked = isAuthenticated && accessStatus !== 'ok';
 
   useEffect(() => {
     if (!navigationState?.key) return;
     // K-03 / SPRINT-14: no decidir nada hasta restaurar la sesión (y resolver
     // canManageUsers); si no, un manager rebota por "/" o por el login.
     if (loading) return;
+    // Sin perfil de acceso no se navega: se ve AccessErrorScreen. Al reintentar bien,
+    // este efecto corre de nuevo y manda a cada uno a su panel (ej. desde /login).
+    if (accessBlocked) return;
 
     const first = segments[0] ?? '';
     // K-01: /admin vive dentro de (tabs) → segments = ['(tabs)', 'admin']. Antes se miraba
@@ -54,10 +60,14 @@ function RootLayoutNav() {
         router.replace('/');
       }
     }
-  }, [isAuthenticated, navigationState?.key, segments, roles, canManageUsers, loading]);
+  }, [isAuthenticated, navigationState?.key, segments, roles, canManageUsers, loading, accessBlocked]);
 
   // K-03: mientras se restaura la sesión se ve el Splash, nunca el login.
   if (loading) return <SplashScreen />;
+  // Falla cerrada (propuesta 2026-11-03): sin perfil de acceso no se muestra ningún panel.
+  if (accessBlocked) {
+    return <AccessErrorScreen retrying={accessStatus === 'loading'} onRetry={reloadAccess} onLogout={logout} />;
+  }
   return <Slot />;
 }
 

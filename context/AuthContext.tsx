@@ -4,8 +4,13 @@ import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 import { API_KEYCLOAK_ADAPTER_URL, REACT_APP_API_URL } from '../config';
 import { Platform } from 'react-native';
+import {
+  AccessStatus, fetchProfileAccess, NO_ACCESS, PLATFORM_ACCESS, ProfileAccess, ROOT_ACCESS,
+} from '../utils/profileAccess';
 
 const CLIENT_ID = 'klaro-frontend';
+// canManageUsers/permissions ya no se guardan (se vuelven a pedir al restaurar la
+// sesión), pero siguen en la lista para que clear() borre lo que dejaron versiones viejas.
 const SESSION_KEYS = [
   'accessToken', 'refreshToken', 'expiresIn', 'userName', 'userId', 'roles', 'canManageUsers', 'permissions',
 ];
@@ -35,36 +40,38 @@ interface AuthState {
    * esto viene del Role asignado en la app, no del JWT. root siempre true. */
   canManageUsers: boolean;
   /** Módulos habilitados por el Role asignado (ver constants/permissionModules.ts).
-   * null = excepción legacy (mismo criterio que PermissionGuard.isLegacy en el
-   * backend): sin Role Y sin businessRole/permissions/accessibleStores -> acceso
-   * total, no "cero módulos". root no necesita este campo, ve todo siempre. */
-  permissions: string[] | null;
+   * Nunca null: vacío = cero módulos. El acceso total va aparte, en fullAccess. */
+  permissions: string[];
+  /** Acceso total: root (rol de Keycloak) o legacy CONFIRMADO por el servidor (mismo
+   * criterio que PermissionGuard.isLegacy en el backend). Un error nunca da acceso total. */
+  fullAccess: boolean;
+  /** P10: locales que el usuario puede usar (accessibleStoreIds). Ignorado con fullAccess. */
+  allowedStoreIds: number[];
+  /** Falla cerrada: 'error' = no se pudo cargar el perfil de acceso → sin permisos y
+   * pantalla "No pudimos cargar tus permisos". 'loading' = reintentando. */
+  accessStatus: AccessStatus | 'loading';
   userName: string | null;
   userId: string | null;
   loading: boolean;
   error: string | null;
 }
 
-interface ProfileAccess { canManageUsers: boolean; permissions: string[] | null }
+/** Campos de AuthState que salen del perfil de acceso. */
+const accessFields = (a: ProfileAccess) => ({
+  canManageUsers: a.canManageUsers,
+  permissions: a.permissions,
+  fullAccess: a.fullAccess,
+  allowedStoreIds: a.allowedStoreIds,
+  accessStatus: a.status,
+});
 
-/** Resuelve canManageUsers + permissions para un staff no-root consultando su
- * perfil. root ya tiene acceso total por su rol de Keycloak, no necesita esto.
- * Espeja PermissionGuard.isLegacy() del backend: sin fila en absoluto, o con
- * fila pero sin Role ni datos del modelo viejo (businessRole/permissions/
- * accessibleStores), es la excepción legacy de acceso total. */
-async function fetchProfileAccess(username: string): Promise<ProfileAccess> {
-  try {
-    const res = await axios.get(`${REACT_APP_API_URL}/api/v2/users/by-username/${username}`, { timeout: 15000 });
-    const d = res.data;
-    const isLegacy = !d.roleId
-      && !d.businessRole
-      && (!d.permissions || d.permissions.length === 0)
-      && (!d.accessibleStoreIds || d.accessibleStoreIds.length === 0);
-    return { canManageUsers: !!d.canManageUsers, permissions: isLegacy ? null : (d.permissions ?? []) };
-  } catch {
-    // Sin fila en app_users -> excepción legacy (mismo criterio que el backend).
-    return { canManageUsers: false, permissions: null };
-  }
+/** root ve todo sin consultar el perfil (igual que antes); platform no tiene empresa;
+ * el resto (staff) depende de su perfil en app_users, y si falla queda sin permisos. */
+async function resolveAccess(appRoles: string[], userName: string): Promise<ProfileAccess> {
+  if (appRoles.includes('root')) return ROOT_ACCESS;
+  if (appRoles.includes('platform')) return PLATFORM_ACCESS;
+  if (!userName) return NO_ACCESS;
+  return fetchProfileAccess(REACT_APP_API_URL, userName);
 }
 
 
@@ -72,6 +79,8 @@ interface AuthContextType extends AuthState {
   /** Lanza AuthError si falla (L-01). */
   login: (username: string, password: string) => Promise<true>;
   logout: () => Promise<void>;
+  /** Vuelve a pedir el perfil de acceso (botón "Reintentar"). */
+  reloadAccess: () => Promise<void>;
   isAuthenticated: boolean;
 }
 
@@ -139,8 +148,7 @@ const EMPTY_STATE: AuthState = {
   refreshToken: null,
   expiresIn: null,
   roles: [],
-  canManageUsers: false,
-  permissions: null,
+  ...accessFields(NO_ACCESS),
   userName: null,
   userId: null,
   loading: false,
@@ -159,24 +167,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // C-07: timer para refresh proactivo antes de que expire el token
   const refreshTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Bug encontrado en testing E2E: scheduleRefresh() se llama DENTRO de login(),
-  // antes de que el setAuthState() de esa misma función corra -- el closure de
-  // refreshAccessToken que scheduleRefresh captura queda con el authState.
-  // canManageUsers/permissions de ANTES del login (el default inicial: false/
-  // null). Con un access token de vida corta (ej. 300s en DEV), el refresh
-  // proactivo pisaba estos valores unos minutos después de cada login, dejando
-  // a cualquier staff con canManageUsers=true viendo el menú vacío de golpe.
-  // Mismo fix que refreshTokenRef: leer del ref, no del closure de authState.
-  const canManageUsersRef = useRef<boolean>(authState.canManageUsers);
-  const permissionsRef    = useRef<string[] | null>(authState.permissions);
+  // antes de que el setAuthState() de esa misma función corra, y el closure de
+  // refreshAccessToken quedaba con los permisos de ANTES del login. Ahora el refresh
+  // directamente no toca los campos de acceso (setAuthState(prev => ...) los conserva).
 
   useEffect(() => {
     refreshTokenRef.current = authState.refreshToken;
   }, [authState.refreshToken]);
-
-  useEffect(() => {
-    canManageUsersRef.current = authState.canManageUsers;
-    permissionsRef.current = authState.permissions;
-  }, [authState.canManageUsers, authState.permissions]);
 
   const setAxiosAuthHeader = (token: string | null) => {
     if (token) {
@@ -233,20 +230,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { access_token, refresh_token, expires_in } = response.data;
       const decodedToken = jwtDecode<any>(access_token);
       const appRoles = resolveAppRoles(decodedToken);
-      const isRoot = appRoles.includes('root');
-      const isPlatform = appRoles.includes('platform');
       const userName = decodedToken.preferred_username;
       const userId = decodedToken.sub;
-      // canManageUsers/permissions no se recalculan en cada refresh (evita una
-      // llamada extra cada ~pocos minutos) -- se mantiene el último valor
-      // conocido, refrescado recién en el próximo login completo. Root siempre
-      // true/null (acceso total), sin excepción. Se lee de los refs (no de
-      // authState directamente) porque scheduleRefresh() captura este closure
-      // ANTES de que el setAuthState() del login que lo programó se aplique --
-      // leer authState acá daría el valor previo al login (bug real encontrado
-      // en testing E2E, ver comentario en la declaración de los refs).
-      const canManageUsers = isRoot ? true : isPlatform ? false : canManageUsersRef.current;
-      const permissions    = isRoot ? null : isPlatform ? [] : permissionsRef.current;
+      // Los campos de acceso (canManageUsers, permissions, fullAccess, locales) no se
+      // recalculan en cada refresh (evita una llamada extra cada pocos minutos): se
+      // conservan los del estado (prev). Se recargan al entrar o al recargar la página.
 
       await Storage.multiSet([
         ['accessToken', access_token],
@@ -255,24 +243,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ['userName', userName],
         ['userId', userId],
         ['roles', JSON.stringify(appRoles)],
-        ['canManageUsers', String(canManageUsers)],
-        ['permissions', JSON.stringify(permissions)],
       ]);
 
       refreshTokenRef.current = refresh_token;
       setAxiosAuthHeader(access_token);
       scheduleRefresh(access_token);
+      // `loading` tampoco se toca: al restaurar la sesión lo baja initializeAuth,
+      // recién después de cargar el perfil de acceso.
       setAuthState(prev => ({
         ...prev,
         accessToken: access_token,
         refreshToken: refresh_token,
         expiresIn: expires_in,
         roles: appRoles,
-        canManageUsers,
-        permissions,
         userName,
         userId,
-        loading: false,
         error: null
       }));
 
@@ -313,15 +298,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // (canManageUsers) viene del Role asignado en la app, no del JWT.
       // SPRINT-16: "platform" (tenant 0) no tiene empresa ni perfil en app_users.
       const appRoles = resolveAppRoles(decodedToken);
-      const isRoot = appRoles.includes('root');
-      const isPlatform = appRoles.includes('platform');
 
       setAxiosAuthHeader(access_token); // necesario antes de poder llamar a /by-username
-      const { canManageUsers, permissions } = isRoot
-        ? { canManageUsers: true, permissions: null }
-        : isPlatform
-          ? { canManageUsers: false, permissions: [] as string[] }
-          : await fetchProfileAccess(userName);
+      // Falla cerrada: si el perfil no carga, la sesión queda abierta pero SIN permisos
+      // (accessStatus 'error') y el layout muestra "No pudimos cargar tus permisos".
+      const access = await resolveAccess(appRoles, userName);
 
       await Storage.multiSet([
         ['accessToken', access_token],
@@ -330,8 +311,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ['userName', userName],
         ['userId', userId],
         ['roles', JSON.stringify(appRoles)],
-        ['canManageUsers', String(canManageUsers)],
-        ['permissions', JSON.stringify(permissions)],
       ]);
 
       refreshTokenRef.current = refresh_token;
@@ -341,8 +320,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         refreshToken: refresh_token,
         expiresIn: expires_in,
         roles: appRoles,
-        canManageUsers,
-        permissions,
+        ...accessFields(access),
         userName,
         userId,
         loading: false,
@@ -382,6 +360,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await clearSession();
   };
 
+  /** Botón "Reintentar" de la pantalla "No pudimos cargar tus permisos". Mientras
+   * tanto el usuario sigue sin permisos (accessStatus 'loading', no 'ok'). */
+  const reloadAccess = async () => {
+    const { roles, userName } = authState;
+    setAuthState(prev => ({ ...prev, ...accessFields(NO_ACCESS), accessStatus: 'loading' }));
+    const access = await resolveAccess(roles, userName ?? '');
+    setAuthState(prev => ({ ...prev, ...accessFields(access) }));
+  };
+
   useEffect(() => {
     const initializeAuth = async () => {
       try {
@@ -391,50 +378,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (accessToken && refreshToken) {
           refreshTokenRef.current = refreshToken;
-          // El refresh conserva canManageUsers/permissions desde los refs: cargarlos del
-          // storage ANTES de refrescar (si no, un manager con token por vencer perdía el menú).
-          canManageUsersRef.current = storageMap.canManageUsers === 'true';
           try {
-            permissionsRef.current = storageMap.permissions ? JSON.parse(storageMap.permissions) : null;
-          } catch {
-            permissionsRef.current = null;
-          }
-          try {
+            // Token vigente (refrescado si estaba por vencer). Los roles salen del token,
+            // no del storage.
+            let token = accessToken;
             if (isTokenExpiringSoon(accessToken)) {
-              await refreshAccessToken();
+              token = (await refreshAccessToken()).access_token;
             } else {
               setAxiosAuthHeader(accessToken);
               scheduleRefresh(accessToken);
-
-              let roles: string[] = [];
-              try {
-                if (storageMap.roles) {
-                  roles = JSON.parse(storageMap.roles);
-                }
-              } catch (e) {
-              }
-
-              let permissions: string[] | null = null;
-              try {
-                if (storageMap.permissions) {
-                  permissions = JSON.parse(storageMap.permissions);
-                }
-              } catch (e) {
-              }
-
-              setAuthState({
-                accessToken,
-                refreshToken,
-                expiresIn: parseInt(storageMap.expiresIn || '0', 10),
-                roles,
-                canManageUsers: storageMap.canManageUsers === 'true',
-                permissions,
-                userName: storageMap.userName,
-                userId: storageMap.userId,
-                loading: false,
-                error: null,
-              });
             }
+            const decoded = jwtDecode<any>(token);
+            const roles = resolveAppRoles(decoded);
+            const userName: string = decoded.preferred_username ?? storageMap.userName ?? '';
+
+            // Falla cerrada: el perfil de acceso se vuelve a pedir en cada carga. Antes se
+            // leía del storage y, si faltaba o no se podía leer, quedaba null = acceso total.
+            const access = await resolveAccess(roles, userName);
+
+            setAuthState(prev => ({
+              ...prev,
+              accessToken: token,
+              refreshToken: refreshTokenRef.current ?? refreshToken,
+              expiresIn: prev.expiresIn ?? parseInt(storageMap.expiresIn || '0', 10),
+              roles,
+              ...accessFields(access),
+              userName,
+              userId: decoded.sub ?? storageMap.userId,
+              loading: false,
+              error: null,
+            }));
           } catch (tokenError) {
             // Rechazo del servidor: refreshAccessToken ya limpió el storage (K-05).
             // Error de red: se conserva lo guardado para reintentar en la próxima carga.
@@ -488,6 +461,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ...authState,
         login,
         logout,
+        reloadAccess,
         isAuthenticated: !!authState.accessToken,
       }}
     >

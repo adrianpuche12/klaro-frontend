@@ -65,10 +65,11 @@ const VALID_YMD = /^\d{4}-\d{2}-\d{2}$/;
 type Preset = 'today' | 'week' | 'month' | 'prevMonth' | 'custom';
 
 export default function ReportsScreen({ store: fixedStore }: { store?: Store | null }) {
-  const { roles, permissions } = useAuth();
+  const { roles, permissions, fullAccess: profileFullAccess } = useAuth();
   const { stores } = useStore();
   const isRoot = roles.includes('root');
-  const fullAccess = isRoot || permissions === null;
+  // Falla cerrada: antes permissions === null (también tras un error) era acceso total.
+  const fullAccess = isRoot || profileFullAccess;
 
   const today = companyToday();
   const [preset, setPreset] = useState<Preset>('month');
@@ -79,7 +80,7 @@ export default function ReportsScreen({ store: fixedStore }: { store?: Store | n
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
   const visibleReports = useMemo(
-    () => REPORTS.filter(r => fullAccess || r.modules.some(m => (permissions ?? []).includes(m))),
+    () => REPORTS.filter(r => fullAccess || r.modules.some(m => permissions.includes(m))),
     [fullAccess, permissions],
   );
 

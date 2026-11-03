@@ -257,18 +257,19 @@ const InventoryScreen = () => {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
 
-  const { roles, canManageUsers, permissions, userName } = useAuth();
+  const { roles, canManageUsers, permissions, fullAccess, userName } = useAuth();
   // I-01 (Revisión 04), adaptado al modelo SPRINT-14 (root / staff + canManageUsers +
   // permissions, ver config/navConfig.ts):
   //  - root puede todo, siempre (no depende de que AuthContext le haya puesto canManageUsers).
   //  - staff con canManageUsers: gestiona según los módulos de su Role. CATALOG habilita
   //    crear/editar/activar/borrar productos y categorías; INVENTORY habilita las salidas
-  //    de stock. permissions === null es el caso legacy (acceso total), igual que navConfig.
+  //    de stock. fullAccess es el caso legacy (acceso total), igual que navConfig;
+  //    un error al cargar el perfil ya no da acceso total (falla cerrada).
   //  - staff sin canManageUsers (cajero): solo ve el stock y registra entradas ("Agregar").
   // Si las entradas del cajero deberían requerir un permiso propio es una decisión de
   // producto pendiente (ver BUGS.md "Para decidir"); no se cambia acá.
   const isRoot = roles.includes('root');
-  const hasModule = (m: string) => permissions === null || permissions.includes(m);
+  const hasModule = (m: string) => fullAccess || permissions.includes(m);
   const isManager      = isRoot || canManageUsers;                       // selector de local, vista de gestión
   const canEditCatalog = isRoot || (canManageUsers && hasModule('CATALOG'));
   const canAdjustOut   = isRoot || (canManageUsers && hasModule('INVENTORY'));
