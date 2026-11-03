@@ -1,13 +1,29 @@
 import { Platform } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
+import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
 import { apiFetch } from './apiFetch';
 
 export interface ImageUploadResult {
   success: boolean;
+  /** Clave del objeto en R2 (no una URL pública): es lo que se guarda en el registro. */
   imageUri?: string;
   error?: string;
+}
+
+/**
+ * URL firmada (válida 5 minutos) para ver un comprobante. El bucket de R2 es privado:
+ * `ref` es lo que tenga guardado el registro en `imageUri` (la clave nueva o la URL
+ * pública vieja `https://pub-…r2.dev/…`, el backend acepta las dos).
+ * Pedirla justo antes de mostrarla; no guardarla, porque vence.
+ */
+export async function getComprobanteUrl(ref: string): Promise<string> {
+  const { data } = await axios.get<{ url: string; expiresInSeconds: number }>(
+    `${REACT_APP_API_URL}/api/v2/uploads/comprobante/url`,
+    { params: { ref } },
+  );
+  return data.url;
 }
 
 export class ImageService {
@@ -30,15 +46,18 @@ export class ImageService {
   }
 
   /**
-   * Sube una imagen al servidor Python
+   * Sube un comprobante al backend, que lo guarda en Cloudflare R2 (bucket privado).
+   * `storeId` es obligatorio: el backend valida que el usuario tenga acceso a ese local.
+   * El backend decide el tipo por el contenido del archivo (solo PDF, JPG o PNG).
    */
   static async uploadImage(
     imageUri: string,
     fileName: string,
-    _folder: string = 'comprobantes'
+    storeId: number
   ): Promise<ImageUploadResult> {
     try {
       const formData = new FormData();
+      formData.append('storeId', String(storeId));
 
       if (Platform.OS === 'web') {
         const response = await apiFetch(imageUri);
@@ -60,11 +79,16 @@ export class ImageService {
       });
 
       if (uploadResponse.ok) {
-        const { url } = await uploadResponse.json();
-        return { success: true, imageUri: url };
-      } else {
-        return { success: false, error: `Error del servidor: ${uploadResponse.status}` };
+        const { key, url } = await uploadResponse.json();
+        return { success: true, imageUri: key ?? url };
       }
+      if (uploadResponse.status === 400) {
+        return { success: false, error: 'Solo se aceptan comprobantes PDF, JPG o PNG.' };
+      }
+      if (uploadResponse.status === 403) {
+        return { success: false, error: 'No tenés permiso para adjuntar comprobantes en este local.' };
+      }
+      return { success: false, error: `Error del servidor: ${uploadResponse.status}` };
     } catch (error) {
       return {
         success: false,

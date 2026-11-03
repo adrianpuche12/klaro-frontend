@@ -5,7 +5,6 @@ const KEYCLOAK_REALM  = process.env.EXPO_PUBLIC_KEYCLOAK_REALM ?? 'klaro-dev';
 const API_BASE        = process.env.EXPO_PUBLIC_API_URL        ?? 'https://dev-api.belopia.app';
 
 export const REACT_APP_API_URL        = API_BASE;
-export const R2_PUBLIC_URL            = 'https://pub-333e5c6f14214d6cb7c0e192a9aadd85.r2.dev';
 export const API_KEYCLOAK_ADAPTER_URL = `${KEYCLOAK_SERVER}/realms/${KEYCLOAK_REALM}/protocol/openid-connect`;
 
 if (__DEV__) {

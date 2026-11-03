@@ -28,7 +28,8 @@ import { COLOR, SPACE, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../theme';
 import { useMoney, useTenantConfig } from '../context/TenantConfigContext';
 import { formatTime } from '../utils/format';
 import { formatDateOnly, hasTime, daysInRange } from '../utils/dateOnly';
-import { apiErrorMessage, isForbidden, NO_PERMISSION_MESSAGE } from '../utils/apiError';
+import { apiErrorMessage, httpStatus, isForbidden, NO_PERMISSION_MESSAGE } from '../utils/apiError';
+import { getComprobanteUrl } from '../utils/ImageService';
 
 /*
  * Revisión 06 — Operaciones (pantalla "Finanzas").
@@ -390,6 +391,18 @@ const AdminScreen = () => {
   const [partialError, setPartialError] = useState('');
 
   const showSnackbar = (msg: string) => { setSnackbarMessage(msg); setSnackbarVisible(true); };
+
+  // El bucket de comprobantes es privado: se pide una URL firmada (5 min) al abrirlo.
+  // `imageUri` puede ser la clave nueva o la URL pública vieja; el backend acepta las dos.
+  const openComprobante = async (imageUri: string) => {
+    try {
+      setViewingImage(await getComprobanteUrl(imageUri));
+    } catch (e) {
+      showSnackbar(httpStatus(e) === 404
+        ? 'No se encontró el comprobante.'
+        : apiErrorMessage(e, 'No se pudo abrir el comprobante.'));
+    }
+  };
 
   const { width: screenWidth } = useWindowDimensions();
   const isLargeScreen = screenWidth >= 768;
@@ -1283,7 +1296,7 @@ const buildImageUrl = (imagePath: string | undefined): string | null => {
               icon="camera"
               size={18}
               iconColor={COLOR.income}
-              onPress={() => setViewingImage(imageUri)}
+              onPress={() => openComprobante(imageUri)}
               accessibilityLabel="Ver comprobante"
             />
           )}

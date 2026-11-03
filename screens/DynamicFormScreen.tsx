@@ -461,14 +461,24 @@ const DynamicFormScreen = () => {
 
     setIsSubmitting(true);
 
+    // F-02: para el cajero el local sale siempre del perfil, no del estado del formulario.
+    const storeId = isCashier && assignedStore ? assignedStore.id : formData.storeId;
+
     try {
       let imageUri = null;
 
       if (selectedImage) {
+        // El backend exige el local del comprobante (valida acceso a ese local). El gasto
+        // administrativo se reparte entre locales: se usa el primero de la distribución.
+        const comprobanteStoreId = formType === 'gasto-admin' ? distribuciones[0]?.storeId : storeId;
+        if (!comprobanteStoreId) {
+          showMessage('error', 'Elegí un local antes de adjuntar el comprobante.');
+          return;
+        }
         const uploadResult = await ImageService.uploadImage(
           selectedImage.uri,
           selectedImage.name = ImageService.generateFileName('IMG'),
-          'comprobantes'
+          comprobanteStoreId
         );
         
         if (uploadResult.success) {
@@ -488,8 +498,6 @@ const DynamicFormScreen = () => {
 
       const amountValue = formData.amount ? formData.amount.replace(/,/g, '') : '0';
       const amount = parseFloat(amountValue);
-      // F-02: para el cajero el local sale siempre del perfil, no del estado del formulario.
-      const storeId = isCashier && assignedStore ? assignedStore.id : formData.storeId;
 
       const basePayload: any =
         formType === 'gasto-admin'
