@@ -18,7 +18,9 @@ export interface MenuItem { key: SidebarScreen; label: string; icon: string }
 export interface AccessInfo {
   roles: string[];
   canManageUsers: boolean;
-  permissions: string[] | null;
+  permissions: string[];
+  /** root o legacy confirmado por el servidor (ver AuthContext). Nunca por un error. */
+  fullAccess: boolean;
 }
 
 // Mapea cada ítem al módulo (o módulos, cuando una pantalla agrupa más de uno -- ej.
@@ -37,10 +39,12 @@ const MODULE_MAP: Partial<Record<SidebarScreen, string[]>> = {
   operations:   ['OPERATIONS'],
 };
 
-/** Filtra el menú según los módulos del Role asignado. permissions === null es la
- * excepción legacy (ver PermissionGuard.isLegacy en el backend): acceso total. */
-function filterMenuByPermissions(menu: MenuItem[], permissions: string[] | null): MenuItem[] {
-  if (permissions === null) return menu;
+/** Filtra el menú según los módulos del Role asignado. fullAccess es la excepción
+ * legacy confirmada por el servidor (ver PermissionGuard.isLegacy en el backend).
+ * Antes era permissions === null, y un error al cargar el perfil también daba null:
+ * menú completo. Ahora un error deja permissions = [] (falla cerrada). */
+function filterMenuByPermissions(menu: MenuItem[], permissions: string[], fullAccess: boolean): MenuItem[] {
+  if (fullAccess) return menu;
   return menu.filter(item => {
     const required = MODULE_MAP[item.key];
     if (!required) return true;
@@ -83,7 +87,7 @@ export const menuFor = (a: AccessInfo): MenuItem[] =>
   a.roles.includes('root')
     ? MENU_ROOT
     : a.canManageUsers
-      ? filterMenuByPermissions(MENU_ADMIN, a.permissions)
+      ? filterMenuByPermissions(MENU_ADMIN, a.permissions, a.fullAccess)
       : MENU_USER;
 
 /** ¿Puede abrir esta pantalla del panel? (para validar ?s= de la URL). */

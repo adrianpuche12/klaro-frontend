@@ -80,10 +80,10 @@ const SidebarDesktop = ({ active, onSelect }: {
   active: SidebarScreen;
   onSelect: (s: SidebarScreen) => void;
 }) => {
-  const { logout, roles, canManageUsers, permissions, userName } = useAuth();
+  const { logout, roles, canManageUsers, permissions, fullAccess, userName } = useAuth();
   const { sidebarCollapsed, toggleSidebar } = useUIPreferences();
   // Menú según rol/Role asignado: misma regla que valida AdminDashboard (config/navConfig.ts).
-  const menu = menuFor({ roles, canManageUsers, permissions });
+  const menu = menuFor({ roles, canManageUsers, permissions, fullAccess });
   const [askLogout, setAskLogout] = useState(false);
 
   // Animación de ancho
@@ -220,9 +220,9 @@ const SidebarMobile = ({ active, onSelect, visible, onClose }: {
   visible: boolean;
   onClose: () => void;
 }) => {
-  const { logout, roles, canManageUsers, permissions, userName } = useAuth();
+  const { logout, roles, canManageUsers, permissions, fullAccess, userName } = useAuth();
   // Menú según rol/Role asignado: misma regla que valida AdminDashboard (config/navConfig.ts).
-  const menu = menuFor({ roles, canManageUsers, permissions });
+  const menu = menuFor({ roles, canManageUsers, permissions, fullAccess });
   const [askLogout, setAskLogout] = useState(false);
 
   return (

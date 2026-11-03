@@ -8,6 +8,8 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import axios from 'axios';
 import { REACT_APP_API_URL } from '../config';
 import { useAuth } from '../context/AuthContext';
+import { filterAllowedStores } from '../utils/profileAccess';
+import { isForbidden, NO_PERMISSION_MESSAGE } from '../utils/apiError';
 import ConfirmDialog from '../components/ConfirmDialog';
 import AppText from '../components/ui/AppText';
 import { MODULES } from '../constants/permissionModules';
@@ -82,7 +84,7 @@ export default function UsersScreen() {
   const API = REACT_APP_API_URL;
   const { width } = useWindowDimensions();
   const isDesktop = width >= BREAKPOINT.desktop;
-  const { roles, userName } = useAuth();
+  const { roles, userName, fullAccess, allowedStoreIds } = useAuth();
   const isRoot = roles.includes('root');
 
   const [users, setUsers]           = useState<AppUser[]>([]);
@@ -138,8 +140,10 @@ export default function UsersScreen() {
     ]);
     if (usersRes.status === 'fulfilled') setUsers(usersRes.value.data);
     else setUsersError(apiError(usersRes.reason, 'No se pudieron cargar los usuarios'));
-    if (storesRes.status === 'fulfilled') setStores(storesRes.value.data);
-    else setSnackbar('Error al cargar locales');
+    // P10: solo se ofrecen (y asignan) los locales que el usuario logueado puede usar.
+    if (storesRes.status === 'fulfilled') {
+      setStores(filterAllowedStores(Array.isArray(storesRes.value.data) ? storesRes.value.data : [], { fullAccess, allowedStoreIds }));
+    } else setSnackbar(isForbidden(storesRes.reason) ? NO_PERMISSION_MESSAGE : 'Error al cargar locales');
     if (rolesRes.status === 'fulfilled') { setRolesList(rolesRes.value.data); setRolesError(false); }
     else { setRolesList([]); setRolesError(true); }
     // Si roles falla, no bloqueamos la pantalla -- el picker queda vacío y,

@@ -29,6 +29,8 @@ import { useMoney, useTenantConfig } from '../context/TenantConfigContext';
 import { formatTime } from '../utils/format';
 import { formatDateOnly, hasTime, daysInRange } from '../utils/dateOnly';
 import { apiErrorMessage, isForbidden, NO_PERMISSION_MESSAGE } from '../utils/apiError';
+import { useAuth } from '../context/AuthContext';
+import { filterAllowedStores } from '../utils/profileAccess';
 
 /*
  * Revisión 06 — Operaciones (pantalla "Finanzas").
@@ -395,10 +397,12 @@ const AdminScreen = () => {
   const isLargeScreen = screenWidth >= 768;
 
   // Stores activos — cargados dinámicamente desde /api/v2/stores/active
+  // P10: solo los locales permitidos para el usuario (root/legacy: todos).
+  const { fullAccess, allowedStoreIds } = useAuth();
   const [activeStores, setActiveStores] = useState<{id: number; name: string}[]>([]);
   useEffect(() => {
     axios.get<{ id: number; name: string }[]>(`${REACT_APP_API_URL}/api/v2/stores/active`, { timeout: API_TIMEOUT })
-      .then(r => setActiveStores(Array.isArray(r.data) ? r.data : []))
+      .then(r => setActiveStores(filterAllowedStores(Array.isArray(r.data) ? r.data : [], { fullAccess, allowedStoreIds })))
       .catch(() => setActiveStores([])); // los nombres de local caen al storeName de cada fila
   }, []);
 

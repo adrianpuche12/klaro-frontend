@@ -38,31 +38,23 @@ const MENU: { key: UserScreen; label: string; icon: string; modules: string[] }[
   { key: 'operaciones',  label: 'Operaciones', icon: 'clipboard-text-outline',    modules: ['OPERATIONS'] },
 ];
 
-/**
- * Filtra el menú según los permisos del usuario. Espeja la excepción legacy
- * de PermissionGuard en el backend: sin Role asignado NI businessRole NI
- * ninguna fila de perfil acotado (permissions/accessibleStoreIds vacíos) =
- * cuenta creada antes de SPRINT-09/14 = acceso total, mismo comportamiento de
- * siempre. Con Role asignado, "permissions vacío" significa CERO módulos
- * marcados, no todos -- por eso roleId es parte de la condición de legacy.
- */
+/** Perfil del usuario: acá solo se usa para el local asignado (P-01). */
 interface UserProfile {
   storeId?: number | null;
-  roleId?: number | null;
-  businessRole?: string | null;
-  permissions?: string[];
   accessibleStoreIds?: number[];
 }
 
-function visibleMenuFor(profile: UserProfile | null): typeof MENU {
-  if (!profile) return MENU;
-  const isLegacy = !profile.roleId
-    && !profile.businessRole
-    && (!profile.permissions || profile.permissions.length === 0)
-    && (!profile.accessibleStoreIds || profile.accessibleStoreIds.length === 0);
-  if (isLegacy) return MENU;
-  const perms = profile.permissions ?? [];
-  return MENU.filter(item => item.modules.some(m => perms.includes(m)));
+/**
+ * Filtra el menú según el acceso que resolvió AuthContext. fullAccess es la excepción
+ * legacy confirmada por el servidor (PermissionGuard.isLegacy en el backend). Con Role
+ * asignado, "permissions vacío" significa CERO módulos, no todos.
+ * Falla cerrada: antes el menú salía de una consulta propia del perfil y, si fallaba
+ * (red, timeout, 5xx), profile quedaba null = menú completo. Ahora un error deja
+ * permissions = [] y el layout muestra "No pudimos cargar tus permisos".
+ */
+function visibleMenuFor(access: { fullAccess: boolean; permissions: string[] }): typeof MENU {
+  if (access.fullAccess) return MENU;
+  return MENU.filter(item => item.modules.some(m => access.permissions.includes(m)));
 }
 
 /** U-02: ¿el valor de ?s= es una sección del menú visible de este usuario? */
@@ -151,7 +143,7 @@ const UserSidebar = ({ menu, active, onSelect, onClose, isDesktop, store }: {
 const UserContent = () => {
   const { width } = useWindowDimensions();
   const isDesktop = width >= BREAKPOINT.desktop;
-  const { userName } = useAuth();
+  const { userName, permissions, fullAccess } = useAuth();
   const { stores, selectedStore, setSelectedStore, loadingStores, refreshStores } = useStore();
   const params = useLocalSearchParams<{ s?: string }>();
 
@@ -203,7 +195,7 @@ const UserContent = () => {
   const posStoreReady = !!assignedStore && selectedStore?.id === assignedStore.id;
   const retryPosStore = () => { refreshStores(); setAttempt(a => a + 1); };
 
-  const visibleMenu = visibleMenuFor(profile);
+  const visibleMenu = visibleMenuFor({ fullAccess, permissions });
 
   // U-02 (= N-02): la sección vive en la URL (/?s=inventory) → sobrevive a la recarga.
   // Derivado durante el render, sin estado extra (ver "05. Estandares de Codigo
@@ -234,8 +226,8 @@ const UserContent = () => {
   const screenTitle = visibleMenu.find(m => m.key === active)?.label ?? BRAND_NAME;
   const noStores = !loadingStores && stores.length === 0;
 
-  // Si el fetch del perfil falla (red, 404), profile queda null -> visibleMenuFor
-  // trata null como legacy (menú completo) para no dejar al usuario sin nada.
+  // El menú ya no depende de este fetch: si falla, solo se bloquea el POS (P-01).
+  // Si falló el perfil de acceso, ni se llega acá (AccessErrorScreen en el layout).
   if (!ready) {
     return <ActivityIndicator size="large" color={COLOR.brand} style={{ flex: 1, marginTop: 60 }} />;
   }
@@ -270,8 +262,8 @@ const UserContent = () => {
             </AppText>
           </View>
         ) : noStores ? (
-          // U-06: stores vacío = el negocio no tiene NINGÚN local activo (no es
-          // que al usuario le falte uno asignado; eso lo cubre posStoreError).
+          // U-06: stores vacío = no hay NINGÚN local activo que este usuario pueda usar
+          // (P10: StoreContext ya filtra por sus locales permitidos).
           <View style={styles.emptyState}>
             <MaterialCommunityIcons name="store-alert-outline" size={48} color={COLOR.warn} />
             <AppText variant="title" centered style={{ marginTop: SPACE.s3 }}>No hay locales activos</AppText>

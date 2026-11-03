@@ -23,8 +23,8 @@ const AdminDashboard = () => {
   const { width } = useWindowDimensions();
   const isDesktop = width >= BREAKPOINT.desktop;
 
-  const { roles, canManageUsers, permissions } = useAuth();
-  const access = { roles, canManageUsers, permissions };
+  const { roles, canManageUsers, permissions, fullAccess } = useAuth();
+  const access = { roles, canManageUsers, permissions, fullAccess };
   const params = useLocalSearchParams<{ s?: string }>();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
