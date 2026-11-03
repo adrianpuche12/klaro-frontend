@@ -19,6 +19,8 @@ import { exportToExcel, createImportTemplate, importFromExcel, TRANSACTION_LABEL
 import { COLOR, FONT_SIZE, FONT_WEIGHT, RADIUS } from '../theme';
 import { REACT_APP_API_URL } from '../config';
 import { apiFetch } from '../utils/apiFetch';
+import { useAuth } from '../context/AuthContext';
+import { filterAllowedStores } from '../utils/profileAccess';
 
 interface ExcelManagerProps {
   visible: boolean;
@@ -33,11 +35,13 @@ const ExcelManager: React.FC<ExcelManagerProps> = ({
   transactions,
   onImportSuccess
 }) => {
+  // P10: la importación solo reconoce los locales permitidos para el usuario.
+  const { fullAccess, allowedStoreIds } = useAuth();
   const [activeStores, setActiveStores] = useState<{id: number; name: string}[]>([]);
   useEffect(() => {
     apiFetch(`${REACT_APP_API_URL}/api/v2/stores/active`)
       .then(r => r.json())
-      .then(setActiveStores)
+      .then(data => setActiveStores(filterAllowedStores(Array.isArray(data) ? data : [], { fullAccess, allowedStoreIds })))
       .catch(() => {});
   }, []);
 
