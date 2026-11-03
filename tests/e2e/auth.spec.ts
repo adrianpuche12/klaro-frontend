@@ -1,66 +1,47 @@
 import { test, expect } from '@playwright/test';
+import { credenciales, faltan, login, loginComo, logout } from './helpers';
 
-const ADMIN_USER = process.env.TEST_ADMIN_USER ?? 'root.admin';
-const ADMIN_PASS = process.env.TEST_ADMIN_PASS ?? '';
-const USER_USER  = process.env.TEST_USER_USER  ?? '';
-const USER_PASS  = process.env.TEST_USER_PASS  ?? '';
+// ─── Sin credenciales: corre siempre ──────────────────────────────────────────
 
-async function login(page: any, username: string, password: string) {
-  await page.goto('/login');
-  // React Native Paper pone un span flotante sobre el input — usamos click force + type.
-  await page.locator('input').nth(0).click({ force: true });
-  await page.keyboard.type(username);
-  await page.locator('input').nth(1).click({ force: true });
-  await page.keyboard.type(password);
-  await page.getByRole('button', { name: 'Ingresar' }).click();
-}
+test('credenciales incorrectas muestran error', async ({ page }) => {
+  // Usuario que no existe: no necesita secrets y además prueba que Keycloak responde
+  // (y acepta el origen del frontend) desde donde corre el test.
+  await login(page, 'e2e.usuario.inexistente', 'contrasena-incorrecta-123');
+  await expect(page.getByText(/Usuario o contraseña incorrectos/)).toBeVisible();
+  await expect(page).toHaveURL(/\/login/);
+});
 
-// Cerrar sesión pide confirmación (Revisión 01, N-03): botón del menú y después el del diálogo.
-async function logout(page: any) {
-  await page.getByRole('button', { name: 'Cerrar sesión' }).first().click();
-  await expect(page.getByText('¿Cerrar sesión?')).toBeVisible();
-  await page.getByRole('button', { name: 'Cerrar sesión' }).last().click();
-}
+// ─── Root (dueño) ─────────────────────────────────────────────────────────────
 
-// ─── Admin (root / admin) ─────────────────────────────────────────────────────
+test.describe('Login de root', () => {
+  test.skip(!credenciales('ROOT'), faltan('ROOT'));
 
-test.describe('Admin login', () => {
-  test.skip(!ADMIN_PASS, 'TEST_ADMIN_PASS no está definido');
-
-  test('login como admin redirige al AdminDashboard', async ({ page }) => {
-    await login(page, ADMIN_USER, ADMIN_PASS);
-    await expect(page).not.toHaveURL(/\/login/);
+  test('login como root entra al panel con Dashboard', async ({ page }) => {
+    await loginComo(page, 'ROOT');
     await expect(page.getByText('Dashboard').first()).toBeVisible();
   });
 
-  test('admin puede cerrar sesión y vuelve al login', async ({ page }) => {
-    await login(page, ADMIN_USER, ADMIN_PASS);
+  test('root puede cerrar sesión y vuelve al login', async ({ page }) => {
+    await loginComo(page, 'ROOT');
     await expect(page.getByText('Dashboard').first()).toBeVisible();
     await logout(page);
     await expect(page).toHaveURL(/\/login/);
     await expect(page.getByRole('button', { name: 'Ingresar' })).toBeVisible();
   });
-
-  test('credenciales incorrectas muestran error', async ({ page }) => {
-    await login(page, ADMIN_USER, 'wrong-password-123');
-    await expect(page.getByText(/Usuario o contraseña incorrectos/)).toBeVisible();
-    await expect(page).toHaveURL(/\/login/);
-  });
 });
 
-// ─── User ─────────────────────────────────────────────────────────────────────
+// ─── Cajero ───────────────────────────────────────────────────────────────────
 
-test.describe('User login', () => {
-  test.skip(!USER_PASS, 'TEST_USER_PASS no está definido');
+test.describe('Login de cajero', () => {
+  test.skip(!credenciales('CAJERO'), faltan('CAJERO'));
 
-  test('login como user redirige al UserDashboard', async ({ page }) => {
-    await login(page, USER_USER, USER_PASS);
-    await expect(page).not.toHaveURL(/\/login/);
+  test('login como cajero entra a Ventas', async ({ page }) => {
+    await loginComo(page, 'CAJERO');
     await expect(page.getByText('Ventas').first()).toBeVisible();
   });
 
-  test('user puede cerrar sesión y vuelve al login', async ({ page }) => {
-    await login(page, USER_USER, USER_PASS);
+  test('cajero puede cerrar sesión y vuelve al login', async ({ page }) => {
+    await loginComo(page, 'CAJERO');
     await expect(page.getByText('Ventas').first()).toBeVisible();
     await logout(page);
     await expect(page).toHaveURL(/\/login/);
