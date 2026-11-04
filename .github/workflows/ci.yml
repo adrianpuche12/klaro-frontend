@@ -38,8 +38,31 @@ jobs:
     name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
     needs: typecheck
-    # Solo en push a develop — no en PRs ni en main
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    # En cada PR (del mismo repo: los forks no reciben secrets) y en push a develop.
+    #  - PR: se construye el frontend DEL PR y se sirve en localhost:8081 (origen que ya
+    #    acepta el CORS de dev-api; que Keycloak también lo acepte lo prueba el test
+    #    "credenciales incorrectas", que no usa secrets). Habla con el backend y Keycloak de DEV.
+    #    Riesgo: el backend es el de develop, no el del PR. Un PR de frontend que depende de
+    #    un cambio de backend sin mergear falla acá hasta que ese backend llegue a DEV.
+    #  - push a develop: prueba lo desplegado en dev.belopia.app (Vercel).
+    # Usuarios por rol: secrets E2E_<ROL>_USER / E2E_<ROL>_PASS (ROOT, ENCARGADO, CAJERO,
+    # CONTADOR). Si un rol no tiene secrets, sus tests se saltean.
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    # Los specs de POS escriben en DEV (turno + venta del cajero de prueba): de a uno.
+    concurrency:
+      group: e2e-dev
+      cancel-in-progress: false
+    env:
+      E2E_ROOT_USER: ${{ secrets.E2E_ROOT_USER }}
+      E2E_ROOT_PASS: ${{ secrets.E2E_ROOT_PASS }}
+      E2E_ENCARGADO_USER: ${{ secrets.E2E_ENCARGADO_USER }}
+      E2E_ENCARGADO_PASS: ${{ secrets.E2E_ENCARGADO_PASS }}
+      E2E_CAJERO_USER: ${{ secrets.E2E_CAJERO_USER }}
+      E2E_CAJERO_PASS: ${{ secrets.E2E_CAJERO_PASS }}
+      E2E_CONTADOR_USER: ${{ secrets.E2E_CONTADOR_USER }}
+      E2E_CONTADOR_PASS: ${{ secrets.E2E_CONTADOR_PASS }}
 
     steps:
       - name: Checkout código
@@ -57,7 +80,28 @@ jobs:
       - name: Instalar Chromium (Playwright)
         run: npx playwright install chromium --with-deps
 
+      - name: Construir el frontend del PR (contra DEV)
+        if: github.event_name == 'pull_request'
+        run: npx expo export --platform web
+        env:
+          EXPO_PUBLIC_API_URL: https://dev-api.belopia.app
+          EXPO_PUBLIC_KEYCLOAK_URL: https://keycloak.belopia.app
+          EXPO_PUBLIC_KEYCLOAK_REALM: klaro-dev
+
+      - name: Servir el frontend del PR en localhost:8081
+        if: github.event_name == 'pull_request'
+        run: |
+          nohup npx --yes serve@14.2.4 -s dist -l 8081 > serve.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/login | grep -q 200; then
+              echo "Frontend del PR servido en localhost:8081"; exit 0
+            fi
+            sleep 2
+          done
+          cat serve.log; echo "No levantó el servidor estático" && exit 1
+
       - name: Esperar que dev.belopia.app esté disponible
+        if: github.event_name == 'push'
         run: |
           echo "Esperando que Vercel DEV esté listo..."
           for i in $(seq 1 12); do
@@ -74,9 +118,16 @@ jobs:
       - name: Correr tests E2E
         run: npm run test:e2e
         env:
-          TEST_BASE_URL: https://dev.belopia.app
-          TEST_ADMIN_USER: root.admin
-          TEST_ADMIN_PASS: ${{ secrets.TEST_ADMIN_PASS }}
+          TEST_BASE_URL: ${{ github.event_name == 'pull_request' && 'http://localhost:8081' || 'https://dev.belopia.app' }}
+
+      # El "error context" de Playwright guarda el árbol de la página en texto, con el valor
+      # de los inputs: ahí quedaba la contraseña del usuario de prueba en claro, y el repo es
+      # público. Se borra antes de subir el reporte (capturas y videos muestran solo puntos).
+      - name: Quitar del reporte los snapshots con valores de inputs
+        if: failure()
+        run: |
+          find playwright-report test-results -name '*.md' -type f -delete 2>/dev/null || true
+          find playwright-report test-results -name '*.zip' -type f -delete 2>/dev/null || true
 
       - name: Subir reporte si fallan
         if: failure()
