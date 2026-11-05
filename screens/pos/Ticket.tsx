@@ -10,7 +10,13 @@ export interface CartItem { productId: number; productName: string; price: numbe
 interface Props {
   cart: CartItem[];
   subtotal: number;
+  /** Impuestos de la cotización del backend (0 si la empresa no tiene). */
+  tax: number;
   total: number;
+  /** Se está pidiendo la cotización al backend: no se confirma hasta tenerla. */
+  quoting: boolean;
+  /** Sin cotización (sin red o error): el total es la suma local, puede faltar algún impuesto. */
+  estimated: boolean;
   itemCount: number;
   onRemove: (id: number) => void;
   onClear: () => void;
@@ -27,7 +33,7 @@ interface Props {
  * despliega para ver y quitar productos uno por uno.
  * Los montos usan useMoney() (moneda de la empresa), nunca un símbolo fijo.
  */
-export default function Ticket({ cart, subtotal, total, itemCount, onRemove, onClear, onSubmit, submitting, full }: Props) {
+export default function Ticket({ cart, subtotal, tax, total, quoting, estimated, itemCount, onRemove, onClear, onSubmit, submitting, full }: Props) {
   const money = useMoney();
   const [open, setOpen] = useState(false);
   const showList = full || open;
@@ -86,10 +92,21 @@ export default function Ticket({ cart, subtotal, total, itemCount, onRemove, onC
             <Text style={s.totalLabel}>{money(subtotal)}</Text>
           </View>
         )}
+        {full && tax > 0 && (
+          <View style={s.totalLine}>
+            <Text style={s.totalLabel}>Impuestos</Text>
+            <Text style={s.totalLabel}>{money(tax)}</Text>
+          </View>
+        )}
         <View style={[s.totalLine, full && s.totalFinal]}>
           <Text style={s.totalLabelFinal}>TOTAL</Text>
           <Text style={s.totalAmount}>{money(total)}</Text>
         </View>
+        {cart.length > 0 && (quoting || estimated) && (
+          <Text style={s.quoteNote} accessibilityLiveRegion="polite">
+            {quoting ? "Calculando el total…" : "Total estimado: el definitivo se calcula al confirmar."}
+          </Text>
+        )}
       </View>
 
       <View style={s.actions}>
@@ -97,7 +114,7 @@ export default function Ticket({ cart, subtotal, total, itemCount, onRemove, onC
           mode="contained"
           onPress={onSubmit}
           loading={submitting}
-          disabled={cart.length === 0 || submitting}
+          disabled={cart.length === 0 || submitting || quoting}
           buttonColor={COLOR.brand}
           textColor={COLOR.inkOnBrand}
           style={s.btn}
@@ -124,6 +141,7 @@ export default function Ticket({ cart, subtotal, total, itemCount, onRemove, onC
 
 const s = StyleSheet.create({
   root:            { padding: SPACE.s3 },
+  quoteNote:       { fontSize: FONT_SIZE.caption, color: COLOR.inkMute, textAlign: "right", marginTop: SPACE.s1 },
   rootFull:        { flex: 1 },
   head:            { flexDirection: 'row', alignItems: 'center', gap: SPACE.s2, marginBottom: SPACE.s2, minHeight: 32 },
   title:           { fontSize: FONT_SIZE.h3, fontWeight: FONT_WEIGHT.bold as any, color: COLOR.ink },
