@@ -30,12 +30,12 @@ test.describe.serial('POS del cajero: turno → venta en efectivo → cierre', (
 
     // ── Vender en efectivo (el POS manda todo como efectivo, ver POSScreen) ──
     // El total sale de la cotización del backend, y la venta lleva una Idempotency-Key (UUID).
-    const cotizacion = page.waitForResponse((r) => //sales/quote$/.test(r.url()) && r.request().method() === 'POST');
+    const cotizacion = page.waitForResponse((r) => /\/sales\/quote$/.test(r.url()) && r.request().method() === 'POST');
     await page.getByText('Toca para seleccionar').first().click();
     await page.getByText('Agregar', { exact: true }).click();
     expect((await cotizacion).status()).toBe(200);
 
-    const venta = page.waitForRequest((r) => r.method() === 'POST' && //shifts/d+/sales$/.test(r.url()));
+    const venta = page.waitForRequest((r) => r.method() === 'POST' && /\/shifts\/\d+\/sales$/.test(r.url()));
     await page.getByRole('button', { name: 'Confirmar venta' }).click();
     expect((await venta).headers()['idempotency-key']).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     await expect(page.getByText(/Venta registrada/)).toBeVisible();
