@@ -55,3 +55,24 @@ test.describe('Root', () => {
     }
   });
 });
+
+test.describe('Contador', () => {
+  test.skip(!credenciales('CONTADOR'), faltan('CONTADOR'));
+
+  // Rol de prueba: SALES_HISTORY + TRANSACTIONS + SALARY_PAYMENTS + SUPPLIER_PAYMENTS, sin POS
+  // ni inventario ni gestionar usuarios (scripts/e2e/preparar-empresa-e2e.mjs).
+  test('ve Finanzas e Informes, no la caja ni el inventario, y nunca el panel', async ({ page }) => {
+    await loginComo(page, 'CONTADOR');
+    await expect(page).not.toHaveURL(/\/admin/);
+    await expect(page.getByText('Finanzas', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('Informes', { exact: true }).first()).toBeVisible();
+    for (const item of ['Inventario', 'Operaciones', 'Usuarios', 'Roles']) {
+      await expect(page.getByText(item, { exact: true })).toHaveCount(0);
+    }
+    await expect(page.getByRole('button', { name: 'Abrir turno' })).toHaveCount(0);
+
+    await page.goto('/admin');
+    await expect(page).not.toHaveURL(/\/admin/);
+    await expect(page.getByText('Usuarios', { exact: true })).toHaveCount(0);
+  });
+});

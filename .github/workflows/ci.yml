@@ -27,6 +27,9 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
+      - name: Tests unitarios (jest)
+        run: npm run test:unit
+
       - name: Verificar build web
         run: npx expo export --platform web
         env:
@@ -46,7 +49,9 @@ jobs:
     #    un cambio de backend sin mergear falla acá hasta que ese backend llegue a DEV.
     #  - push a develop: prueba lo desplegado en dev.belopia.app (Vercel).
     # Usuarios por rol: secrets E2E_<ROL>_USER / E2E_<ROL>_PASS (ROOT, ENCARGADO, CAJERO,
-    # CONTADOR). Si un rol no tiene secrets, sus tests se saltean.
+    # CONTADOR), de la empresa de prueba "e2e-pruebas" de klaro-dev (scripts/e2e/preparar-empresa-e2e.mjs;
+    # contraseñas solo en ~/.secrets de Jorge). Sin secrets, los tests del rol se saltean, y en
+    # develop eso deja el job en rojo (paso "Ningún test E2E salteado").
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
@@ -116,9 +121,23 @@ jobs:
           echo "DEV no respondió en 2 minutos" && exit 1
 
       - name: Correr tests E2E
-        run: npm run test:e2e
+        run: npm run test:e2e -- --reporter=list,json,html
         env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: e2e-results.json
           TEST_BASE_URL: ${{ github.event_name == 'pull_request' && 'http://localhost:8081' || 'https://dev.belopia.app' }}
+
+      # En develop no se acepta ningún test salteado: si un secret E2E_* vence o se borra, los
+      # tests de ese rol se saltean (test.skip) y el job quedaba verde igual. Acá queda rojo.
+      - name: Ningún test E2E salteado en develop
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        run: |
+          node -e "
+            const s = require('./e2e-results.json').stats;
+            console.log('E2E:', JSON.stringify(s));
+            if (s.skipped > 0) {
+              console.log('::error::' + s.skipped + ' tests E2E salteados. Revisar los secrets E2E_* (scripts/e2e/preparar-empresa-e2e.mjs).');
+              process.exit(1);
+            }"
 
       # El "error context" de Playwright guarda el árbol de la página en texto, con el valor
       # de los inputs: ahí quedaba la contraseña del usuario de prueba en claro, y el repo es
