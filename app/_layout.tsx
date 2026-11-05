@@ -2,6 +2,7 @@ import { Slot, useSegments, useRootNavigationState, router } from 'expo-router';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import * as Sentry from '@sentry/react';
+import Constants from 'expo-constants';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { StoreProvider } from '../context/StoreContext';
 import { UIPreferencesProvider } from '../context/UIPreferencesContext';
@@ -18,6 +19,8 @@ if (Platform.OS === 'web' && process.env.EXPO_PUBLIC_SENTRY_DSN) {
   Sentry.init({
     dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
     environment: env,
+    // Mismo formato que el backend (belopia-backend@<sha>): qué deploy introdujo un error.
+    release: `belopia-frontend@${Constants.expoConfig?.extra?.release ?? 'local'}`,
     tracesSampleRate: env === 'production' ? 0.2 : 1.0,
     integrations: [Sentry.browserTracingIntegration()],
   });
