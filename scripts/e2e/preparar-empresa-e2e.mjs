@@ -15,6 +15,7 @@
  *
  * Variables opcionales: API_URL (https://dev-api.belopia.app), KC_URL (https://keycloak.belopia.app),
  * REALM (klaro-dev), CLIENT_ID (klaro-frontend), SLUG (e2e-pruebas).
+ * ROTAR=1: además, contraseñas nuevas para los 4 usuarios (después: gh secret set -f OUT_FILE).
  */
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -140,6 +141,22 @@ for (const def of ROLES) {
   } else {
     if (!s[`E2E_${def.key}_PASS`]) throw new Error(`${username} existe pero no está en OUT_FILE`);
     console.log(`Usuario ${username} ya existe`);
+  }
+}
+
+// 3b. ROTAR=1: contraseñas nuevas para los 4 (p. ej. si se filtraron), por el mismo endpoint que
+// usa la pantalla de Usuarios. Cada una se guarda apenas se aplica; el dueño va al final porque
+// es quien hace los cambios.
+if (env('ROTAR') === '1') {
+  const lista = await api(root, 'GET', '/api/v2/users');
+  for (const k of ['ENCARGADO', 'CONTADOR', 'CAJERO', 'ROOT']) {
+    const u = lista.find((x) => x.username === USERS[k]);
+    if (!u) throw new Error(`No encontré ${USERS[k]} para rotar`);
+    const nueva = pass();
+    await api(root, 'PUT', `/api/v2/users/${u.id}/reset-password`, { password: nueva });
+    s[`E2E_${k}_PASS`] = nueva;
+    guardarSecretos(s);
+    console.log(`Contraseña rotada: ${USERS[k]}`);
   }
 }
 
