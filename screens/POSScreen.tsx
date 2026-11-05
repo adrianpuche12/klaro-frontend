@@ -17,6 +17,7 @@ import { useMoney } from '../context/TenantConfigContext';
 import { APP_LOCALE, formatTime } from '../utils/format';
 import { BRAND_NAME } from '../constants/brand';
 import Ticket, { CartItem } from './pos/Ticket';
+import { ClaveDeVenta } from '../utils/saleIdempotency';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -42,7 +43,10 @@ interface DailySummary {
   productSummary: ProductSummaryItem[];
 }
 
-const ISV = 0; // ISV deshabilitado por solicitud del cliente
+/** POST /shifts/{id}/sales/quote: el precio que calcula el backend con el mismo código que la venta. */
+interface SaleQuote {
+  subtotal: number; tax: number; baseTotal: number; surcharge: number; total: number;
+}
 
 // Aplana categorías para chips
 const flatCats = (cats: Category[]): Category[] => {
@@ -85,6 +89,11 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
   const [cart, setCart]               = useState<CartItem[]>([]);
   const [snackbar, setSnackbar]       = useState('');
   const [submitting, setSubmitting]   = useState(false);
+  // Cotización del backend del carrito actual (impuestos y recargos de la empresa).
+  const [quote, setQuote]             = useState<SaleQuote | null>(null);
+  const [quoting, setQuoting]         = useState(false);
+  // Una Idempotency-Key por venta: doble toque o reintento tras un timeout no cobran dos veces.
+  const claveVenta                    = useRef(new ClaveDeVenta());
 
   // Tab del POS
   const [posTab, setPosTab]               = useState<'nueva' | 'ventas'>('nueva');
@@ -260,12 +269,30 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
 
   // ── Carrito ───────────────────────────────────────────────────────────────
 
-  // Estimación local: el total real (impuestos/recargos del tenant) lo calcula el
-  // backend y se informa al confirmar la venta (P-06).
+  // El total lo calcula el backend (cotización, mismo código que la venta): impuestos y recargos
+  // de la empresa. Sin cotización (cargando o sin red) se muestra la suma local como estimado.
   const cartSubtotal  = cart.reduce((s, i) => s + i.subtotal, 0);
-  const cartISV       = cartSubtotal * ISV;
-  const cartTotal     = cartSubtotal + cartISV;
   const cartItemCount = cart.reduce((s, i) => s + i.qty, 0);
+  const cartTotal     = quote?.total ?? cartSubtotal;
+  const itemsDeVenta  = cart.map(i => ({ productId: i.productId, quantity: i.qty }));
+
+  useEffect(() => {
+    if (!shift || cart.length === 0) { setQuote(null); setQuoting(false); return; }
+    let vigente = true;
+    setQuoting(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await axios.post<SaleQuote>(`${API}/api/v2/shifts/${shift.id}/sales/quote`,
+          { items: cart.map(i => ({ productId: i.productId, quantity: i.qty })) }, { timeout: 15000 });
+        if (vigente) setQuote(res.data);
+      } catch {
+        if (vigente) setQuote(null); // se confirma igual: el backend calcula el total al registrar
+      } finally {
+        if (vigente) setQuoting(false);
+      }
+    }, 250);
+    return () => { vigente = false; clearTimeout(t); };
+  }, [cart, shift?.id, API]);
 
   const isInCart = (productId: number) => cart.some(c => c.productId === productId);
 
@@ -319,17 +346,28 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
     const username = requireUser();
     if (!username) return;
     setSubmitting(true);
+    // Misma clave mientras el carrito no cambie: si la respuesta se perdió y el cajero reintenta,
+    // el backend devuelve la venta ya registrada en vez de crear otra.
+    const clave = claveVenta.current.para(cart);
     try {
       const res = await axios.post<SaleRecord>(`${API}/api/v2/shifts/${shift.id}/sales`, {
         username,
-        items: cart.map(i => ({ productId: i.productId, quantity: i.qty })),
-      });
+        items: itemsDeVenta,
+      }, { headers: { 'Idempotency-Key': clave }, timeout: 20000 });
+      claveVenta.current.registrada();
       clearCart();
       // P-06: aviso con el total que registró el servidor, en la moneda de la empresa.
       setSnackbar(`Venta registrada · ${money(res.data?.total ?? cartTotal)}`);
       loadCatalog();
       loadShiftSales(); // P-11: KPIs y contador desde el servidor, no optimistas
-    } catch (e: any) { setSnackbar(e.response?.data?.error || 'Error al registrar venta'); }
+    } catch (e: any) {
+      if (e.response?.data?.error) {
+        setSnackbar(e.response.data.error); // 409 stock insuficiente, 400 datos inválidos
+      } else {
+        // Sin respuesta (timeout, red): no se sabe si se registró. Reintentar es seguro.
+        setSnackbar('No se pudo confirmar la venta. Reintentá: si ya se había registrado, no se cobra dos veces.');
+      }
+    }
     finally { setSubmitting(false); }
   };
 
@@ -645,8 +683,8 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
 
         {/* ══ TICKET ══ */}
         {isDesktop
-          ? <View style={styles.ticketDesktop}><Ticket cart={cart} subtotal={cartSubtotal} total={cartTotal} itemCount={cartItemCount} onRemove={removeFromCart} onClear={clearCart} onSubmit={handleSubmitSale} submitting={submitting} full /></View>
-          : <View style={styles.ticketMobile}><Ticket cart={cart} subtotal={cartSubtotal} total={cartTotal} itemCount={cartItemCount} onRemove={removeFromCart} onClear={clearCart} onSubmit={handleSubmitSale} submitting={submitting} full={false} /></View>
+          ? <View style={styles.ticketDesktop}><Ticket cart={cart} subtotal={quote?.subtotal ?? cartSubtotal} tax={quote?.tax ?? 0} total={cartTotal} quoting={quoting} estimated={!quote} itemCount={cartItemCount} onRemove={removeFromCart} onClear={clearCart} onSubmit={handleSubmitSale} submitting={submitting} full /></View>
+          : <View style={styles.ticketMobile}><Ticket cart={cart} subtotal={quote?.subtotal ?? cartSubtotal} tax={quote?.tax ?? 0} total={cartTotal} quoting={quoting} estimated={!quote} itemCount={cartItemCount} onRemove={removeFromCart} onClear={clearCart} onSubmit={handleSubmitSale} submitting={submitting} full={false} /></View>
         }
       </View>}
 
