@@ -152,4 +152,4 @@ jobs:
           path: |
             test-results/**/*.png
             test-results/**/*.webm
-          retention-days: 7
+          retention-days: 3   # ventana corta si algún día se cuela algo sensible
