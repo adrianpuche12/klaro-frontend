@@ -28,6 +28,7 @@ export function apiErrorMessage(e: unknown, fallback: string): string {
   const status = e.response.status;
   if (status === 403) return 'No tenés permiso para realizar esta acción.';
   if (status === 401) return 'Tu sesión venció. Volvé a iniciar sesión.';
+  if (status === 429) return rateLimitMessage(e.response.headers?.['retry-after']);
   if (status >= 500) return fallback;
   const data: any = e.response.data;
   if (typeof data === 'string' && data.trim() && data.length < 300) return data.trim();
@@ -36,4 +37,32 @@ export function apiErrorMessage(e: unknown, fallback: string): string {
     if (typeof msg === 'string' && msg.trim()) return msg.trim();
   }
   return fallback;
+}
+
+/**
+ * 429 del rate limit del backend (RateLimitingFilter: 300/min por usuario, 100/min por IP sin
+ * token, techo de 1.000/min por IP). El cuerpo viene en inglés ("Too Many Requests"), y casi todas
+ * las pantallas muestran `data.error` tal cual. Por eso el interceptor de AuthContext reescribe el
+ * cuerpo una sola vez con un mensaje claro, y ninguna pantalla tiene que cambiar.
+ * `Retry-After` se lee si llega (en mobile llega; en la web el navegador lo oculta porque CORS no
+ * lo expone, y se usa "un minuto").
+ */
+export const isRateLimited = (e: unknown): boolean => httpStatus(e) === 429;
+
+export function rateLimitMessage(retryAfter?: unknown): string {
+  const s = Number(retryAfter);
+  const espera = Number.isFinite(s) && s > 0 && s <= 120
+    ? `${Math.ceil(s)} segundo${Math.ceil(s) === 1 ? '' : 's'}`
+    : 'un minuto';
+  return `Hay demasiados pedidos seguidos desde este usuario o esta conexión. Esperá ${espera} y probá de nuevo; no se perdió nada.`;
+}
+
+/** Reescribe el cuerpo de un 429 con el mensaje claro (lo usa el interceptor de AuthContext). */
+export function markRateLimited(e: unknown): void {
+  if (!axios.isAxiosError(e) || e.response?.status !== 429) return;
+  const headers: any = e.response.headers ?? {};
+  const retry = typeof headers.get === 'function' ? headers.get('retry-after') : headers['retry-after'];
+  const msg = rateLimitMessage(retry);
+  const prev = e.response.data;
+  e.response.data = { ...(prev && typeof prev === 'object' ? prev : {}), error: msg, message: msg };
 }

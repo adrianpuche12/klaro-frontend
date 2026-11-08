@@ -2,6 +2,7 @@ import React, { createContext, useState, useContext, useEffect, useRef } from 'r
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
+import { markRateLimited } from '../utils/apiError';
 import { API_KEYCLOAK_ADAPTER_URL, REACT_APP_API_URL } from '../config';
 import { Platform } from 'react-native';
 import {
@@ -429,6 +430,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const interceptor = axios.interceptors.response.use(
       response => response,
       async error => {
+        markRateLimited(error); // 429: mensaje claro en vez de "Too Many Requests" (utils/apiError)
         const originalRequest = error.config;
         if (
           error.response?.status === 401 &&
