@@ -34,7 +34,8 @@ test.describe.serial('POS del cajero: turno → venta en efectivo → cierre', (
     await page.getByRole('button', { name: 'Confirmar venta' }).click();
     await expect(page.getByText(/Venta registrada/)).toBeVisible();
 
-    await page.getByText(/Ventas del turno/).click();
+    // la pestaña ("Ventas del turno (N)"), no el KPI de arriba que dice lo mismo sin el contador
+    await page.getByText(/^Ventas del turno \(\d+\)$/).click();
     await expect(page.getByText('Todavía no hay ventas en este turno.')).toHaveCount(0);
 
     // ── Cerrar turno ──
