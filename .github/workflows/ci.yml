@@ -39,7 +39,8 @@ jobs:
 
   e2e:
     name: E2E Tests (Playwright)
-    runs-on: ubuntu-latest
+    # ubuntu-24.04 fijo: desde el 07-Nov ubuntu-latest es 26.04 y Playwright todavía no trae Chromium para esa versión
+    runs-on: ubuntu-24.04
     needs: typecheck
     # En cada PR (del mismo repo: los forks no reciben secrets) y en push a develop.
     #  - PR: se construye el frontend DEL PR y se sirve en localhost:8081 (origen que ya
