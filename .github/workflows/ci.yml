@@ -27,6 +27,9 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
+      - name: Tests unitarios (jest)
+        run: npm run test:unit
+
       - name: Verificar build web
         run: npx expo export --platform web
         env:
@@ -36,7 +39,8 @@ jobs:
 
   e2e:
     name: E2E Tests (Playwright)
-    runs-on: ubuntu-latest
+    # ubuntu-24.04 fijo: desde el 07-Nov ubuntu-latest es 26.04 y Playwright todavía no trae Chromium para esa versión
+    runs-on: ubuntu-24.04
     needs: typecheck
     # En cada PR (del mismo repo: los forks no reciben secrets) y en push a develop.
     #  - PR: se construye el frontend DEL PR y se sirve en localhost:8081 (origen que ya
@@ -46,7 +50,9 @@ jobs:
     #    un cambio de backend sin mergear falla acá hasta que ese backend llegue a DEV.
     #  - push a develop: prueba lo desplegado en dev.belopia.app (Vercel).
     # Usuarios por rol: secrets E2E_<ROL>_USER / E2E_<ROL>_PASS (ROOT, ENCARGADO, CAJERO,
-    # CONTADOR). Si un rol no tiene secrets, sus tests se saltean.
+    # CONTADOR), de la empresa de prueba "e2e-pruebas" de klaro-dev (scripts/e2e/preparar-empresa-e2e.mjs;
+    # contraseñas solo en ~/.secrets de Jorge). Sin secrets, los tests del rol se saltean, y en
+    # develop eso deja el job en rojo (paso "Ningún test E2E salteado").
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
@@ -116,23 +122,35 @@ jobs:
           echo "DEV no respondió en 2 minutos" && exit 1
 
       - name: Correr tests E2E
-        run: npm run test:e2e
+        run: npm run test:e2e -- --reporter=list,json   # sin html: ver "Subir capturas"
         env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: e2e-results.json
           TEST_BASE_URL: ${{ github.event_name == 'pull_request' && 'http://localhost:8081' || 'https://dev.belopia.app' }}
 
-      # El "error context" de Playwright guarda el árbol de la página en texto, con el valor
-      # de los inputs: ahí quedaba la contraseña del usuario de prueba en claro, y el repo es
-      # público. Se borra antes de subir el reporte (capturas y videos muestran solo puntos).
-      - name: Quitar del reporte los snapshots con valores de inputs
-        if: failure()
+      # En develop no se acepta ningún test salteado: si un secret E2E_* vence o se borra, los
+      # tests de ese rol se saltean (test.skip) y el job quedaba verde igual. Acá queda rojo.
+      - name: Ningún test E2E salteado en develop
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
         run: |
-          find playwright-report test-results -name '*.md' -type f -delete 2>/dev/null || true
-          find playwright-report test-results -name '*.zip' -type f -delete 2>/dev/null || true
+          node -e "
+            const s = require('./e2e-results.json').stats;
+            console.log('E2E:', JSON.stringify(s));
+            if (s.skipped > 0) {
+              console.log('::error::' + s.skipped + ' tests E2E salteados. Revisar los secrets E2E_* (scripts/e2e/preparar-empresa-e2e.mjs).');
+              process.exit(1);
+            }"
 
-      - name: Subir reporte si fallan
+      # NUNCA subir playwright-report/ ni el JSON: el repo es público y el reporte guarda lo que
+      # se escribió en los inputs. El "error context" (.md) tiene el valor de cada input, y el
+      # index.html lleva embebidos (zip en base64) los pasos `Type "<texto>"`: así se filtraron
+      # TEST_ADMIN_PASS (hasta el 04-Nov) y los E2E_*_PASS (05-Nov, rotados). Solo se suben las
+      # capturas y los videos del fallo: el campo de contraseña se ve como puntos.
+      - name: Subir capturas y videos si fallan
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 7
+          name: e2e-capturas
+          path: |
+            test-results/**/*.png
+            test-results/**/*.webm
+          retention-days: 3   # ventana corta si algún día se cuela algo sensible

@@ -356,11 +356,18 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
     setClosingError(null);
     try {
       await axios.post(`${API}/api/v2/shifts/${shift.id}/closing`, { username });
+      // El turno se limpia recién al tocar "Aceptar" (aceptarCierre): con setShift(null) acá, la pantalla
+      // pasaba enseguida a "sin turno" y el cajero nunca veía la confirmación "Turno cerrado" (lo encontró el E2E).
       setClosingDone(true);
-      setShift(null);
       clearCart();
     } catch (e: any) { setClosingError(e.response?.data?.error || 'Error al confirmar cierre'); }
     finally { setShiftBusy(false); }
+  };
+
+  const aceptarCierre = () => {
+    setClosingModal(false);
+    setClosingDone(false);
+    setShift(null);
   };
 
   // Chips de local (solo admin). Reusados en "sin turno", "error de turno" y encabezado.
@@ -717,7 +724,7 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
       )}
 
       {/* ══ MODAL CIERRE DE TURNO ══ */}
-      <Modal visible={closingModal} transparent animationType="slide" onRequestClose={() => !closingDone && !shiftBusy && setClosingModal(false)}>
+      <Modal visible={closingModal} transparent animationType="slide" onRequestClose={() => closingDone ? aceptarCierre() : !shiftBusy && setClosingModal(false)}>
         <View style={styles.overlay}>
           <View style={[styles.modal, { maxWidth: 520, maxHeight: '92%' }]}>
             {closingDone ? (
@@ -725,7 +732,7 @@ export default function POSScreen({ hideStoreSelector = false }: { hideStoreSele
                 <MaterialCommunityIcons name="check-circle-outline" size={52} color={COLOR.income} />
                 <Text style={[styles.modalTitle, { textAlign: 'center', marginTop: 12 }]}>Turno cerrado</Text>
                 <Text style={{ color: COLOR.ink2, textAlign: 'center', marginTop: 8 }}>El cierre fue registrado en el sistema financiero.</Text>
-                <Button mode="contained" buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ marginTop: 20, borderRadius: RADIUS.r2 }} onPress={() => setClosingModal(false)}>Aceptar</Button>
+                <Button mode="contained" buttonColor={COLOR.brand} textColor={COLOR.inkOnBrand} style={{ marginTop: 20, borderRadius: RADIUS.r2 }} onPress={aceptarCierre}>Aceptar</Button>
               </View>
             ) : loadingSummary ? (
               <ActivityIndicator color={COLOR.brand} style={{ margin: 40 }} />
